@@ -3,16 +3,26 @@
 #include <string.h>
 
 #define U64 unsigned long long
+#define sq unsigned short
 
 // Operations on U64 bitboard by square
-#define set_bit(bitboard, square) (bitboard |= (1ULL << square))
-#define get_bit(bitboard, square) (bitboard & (1ULL << square))
-#define pop_bit(bitboard, square) (get_bit(bitboard, square) ? bitboard ^= (1ULL << square) : 0)
+static inline void set_bit(U64 bitboard, sq square) {
+    bitboard |= (1ULL << square);
+}
+static inline void toggle_bit(U64 bitboard, sq square) {
+    bitboard ^= (1ULL << square);
+}
+static inline sq get_bit(U64 bitboard, sq square) {
+    return bitboard & (1ULL << square);
+}
+
+//#define pop_bit(bitboard, square) (get_bit(bitboard, square) ? bitboard ^= (1ULL << square) : 0)
+
+
+// Constants:
 
 #define start_fen "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 #define empty_fen "8/8/8/8/8/8/8/8 w KQkq - 0 1"
-
-// Constants:
 
 U64 bishop_magic_numbers[64] = {
     0x40040822862081ULL,
@@ -231,10 +241,10 @@ enum { // Rook = 0, Bishop = 1
 };
 
 // U64 with all bits apart from a and h file on
-const U64 not_a = 18374403900871474942ULL;
-const U64 not_h = 9187201950435737471ULL;
-const U64 not_ab = 18229723555195321596ULL;
-const U64 not_gh = 4557430888798830399ULL;
+const U64 not_a = (U64)0xFEFEFEFEFEFEFEFE;
+const U64 not_h = (U64)0x7F7F7F7F7F7F7F7F;
+const U64 not_ab = (U64)0xFCFCFCFCFCFCFCFC;
+const U64 not_gh = (U64)0x3F3F3F3F3F3F3F3F;
 
 
 // Count bits in a bitboard
@@ -261,7 +271,7 @@ void print_bitboard(U64 bitboard) {
     for (int row = 0; row < 8; row++) {
         printf(" %d ", 8 - row); // Print rank
         for (int col = 0; col < 8; col++) {
-            int square = row * 8 + col; // Get integer value of square
+            sq square = row * 8 + col; // Get integer value of square
             printf(" %d ", get_bit(bitboard, square) ? 1 : 0);
         }
         printf("\n");
@@ -272,8 +282,8 @@ void print_bitboard(U64 bitboard) {
 U64 set_occupancy(int index, int relevant_bits, U64 attack_board) {
     U64 occupancy = 0ULL;
     for (int count = 0; count < relevant_bits; count++) {
-        int square = lsb_index(attack_board);
-        pop_bit(attack_board, square);
+        sq square = lsb_index(attack_board);
+        toggle_bit(attack_board, square);
         if (index & (1 << count)) {
             set_bit(occupancy, square);
         }
@@ -311,7 +321,7 @@ U64 get_magic() {
     return get_random() & get_random() & get_random();
 }
 
-U64 find_magic(int square, int bishop_flag) {
+U64 find_magic(sq square, int bishop_flag) {
     U64 attacks[4096];
     U64 used[4096];
     U64 occupancies[4096];
@@ -344,7 +354,7 @@ U64 find_magic(int square, int bishop_flag) {
 }
 
 void init_magic() {
-    for (int square = 0; square < 64; square++) {
+    for (sq square = 0; square < 64; square++) {
         bishop_magic_numbers[square] = find_magic(square, bishop);
         rook_magic_numbers[square] = find_magic(square, rook);
     }
@@ -352,7 +362,7 @@ void init_magic() {
 
 */
 
-U64 get_bishop_attacks(int square, U64 blockers) {
+U64 get_bishop_attacks(sq square, U64 blockers) {
     U64 attacks = 0ULL;
     U64 bitboard = 0ULL;
     set_bit(bitboard, square);
@@ -363,25 +373,25 @@ U64 get_bishop_attacks(int square, U64 blockers) {
     int r, c;
     for (r = row + 1, c = col + 1; r <= 7 && c <= 7; r++, c++) {
         set_bit(attacks, r * 8 + c);
-        if ((1ULL << r * 8 + c) & blockers) break;
+        if (get_bit(blockers, r * 8 + c)) break;
     }
     for (r = row - 1, c = col + 1; r >= 0 && c <= 7; r--, c++) {
         set_bit(attacks, r * 8 + c);
-        if ((1ULL << r * 8 + c) & blockers) break;
+        if (get_bit(blockers, r * 8 + c)) break;
     }
     for (r = row + 1, c = col - 1; r <= 7 && c >= 0; r++, c--) {
         set_bit(attacks, r * 8 + c);
-        if ((1ULL << r * 8 + c) & blockers) break;
+        if (get_bit(blockers, r * 8 + c)) break;
     }
     for (r = row - 1, c = col - 1; r >= 0 && c >= 0; r--, c--) {
         set_bit(attacks, r * 8 + c);
-        if ((1ULL << r * 8 + c) & blockers) break;
+        if(get_bit(blockers, r * 8 + c)) break;
     }
 
     return attacks;
 }
 
-U64 get_rook_attacks(int square, U64 blockers) {
+U64 get_rook_attacks(sq square, U64 blockers) {
     U64 attacks = 0ULL;
     U64 bitboard = 0ULL;
     set_bit(bitboard, square);
@@ -391,31 +401,27 @@ U64 get_rook_attacks(int square, U64 blockers) {
 
     int r, c;
     for (r = row + 1; r <= 7; r++) {
-        U64 attack = 1ULL << r * 8 + col;
-        attacks |= attack;
-        if (attack & blockers) break;
+        set_bit(attacks, r * 8 + col);
+        if (get_bit(blockers, r * 8 + col)) break;
     }
     for (r = row - 1; r >= 0; r--) {
-        U64 attack = 1ULL << r * 8 + col;
-        attacks |= attack;
-        if (attack & blockers) break;
+        set_bit(attacks, r * 8 + col);
+        if (get_bit(blockers, r * 8 + col)) break;
     }
     for (c = col + 1; c <= 7; c++) {
-        U64 attack = 1ULL << row * 8 + c;
-        attacks |= attack;
-        if (attack & blockers) break;
+        set_bit(attacks, row * 8 + c);
+        if (get_bit(blockers, row * 8 + c)) break;
     }
     for (c = col - 1; c >= 0; c--) {
-        U64 attack = 1ULL << row * 8 + c;
-        attacks |= attack;
-        if (attack & blockers) break;
+        set_bit(attacks, row * 8 + c);
+        if (get_bit(blockers, row * 8 + c)) break;
     }
 
     return attacks;
 }
 
 // All attacks calculated once, then looked up
-U64 generate_pawn_attacks(int square, int side) {
+U64 generate_pawn_attacks(sq square, int side) {
     U64 attacks = 0ULL; // Attacks bitboard
     U64 bitboard = 0ULL; // Piece bitboard
     set_bit(bitboard, square);
@@ -439,7 +445,7 @@ U64 generate_pawn_attacks(int square, int side) {
     return attacks; 
 }
 
-U64 generate_knight_attacks(int square) {
+U64 generate_knight_attacks(sq square) {
     U64 attacks = 0ULL;
     U64 bitboard = 0ULL;
     set_bit(bitboard, square);
@@ -462,7 +468,7 @@ U64 generate_knight_attacks(int square) {
     return attacks;
 }
 
-U64 generate_king_attacks(int square) {
+U64 generate_king_attacks(sq square) {
     U64 attacks = 0ULL;
     U64 bitboard = 0uLL;
     set_bit(bitboard, square);
@@ -482,7 +488,7 @@ U64 generate_king_attacks(int square) {
     return attacks;
 }
 
-U64 generate_bishop_magic(int square) {
+U64 generate_bishop_magic(sq square) {
     U64 attacks = 0ULL;
 
     int row = square / 8;
@@ -505,7 +511,7 @@ U64 generate_bishop_magic(int square) {
     return attacks;
 }
 
-U64 generate_rook_magic(int square) {
+U64 generate_rook_magic(sq square) {
     U64 attacks = 0ULL;
 
     int row = square / 8;
@@ -534,21 +540,21 @@ U64 generate_rook_magic(int square) {
 U64 bishop_attacks[64][512], rook_attacks[64][4096];
 U64 bishop_boards[64], rook_boards[64];
 
-static inline U64 generate_bishop_attacks(int square, U64 occupancy) {
+static inline U64 generate_bishop_attacks(sq square, U64 occupancy) {
     occupancy &= bishop_boards[square];
     occupancy *= bishop_magic_numbers[square];
-    occupancy >>= 64 - bishop_bits[square];
+    occupancy >>= (64 - bishop_bits[square]);
     return bishop_attacks[square][occupancy];
 }
 
-static inline U64 generate_rook_attacks(int square, U64 occupancy) {
+static inline U64 generate_rook_attacks(sq square, U64 occupancy) {
     occupancy &= rook_boards[square];
     occupancy *= rook_magic_numbers[square];
     occupancy >>= 64 - rook_bits[square];
     return rook_attacks[square][occupancy];
 }
 
-static inline U64 generate_queen_attacks(int square, U64 occupancy) {
+static inline U64 generate_queen_attacks(sq square, U64 occupancy) {
     return generate_bishop_attacks(square, occupancy) | generate_rook_attacks(square, occupancy);
 }
 
@@ -560,26 +566,26 @@ U64 knight_attacks[64];
 U64 king_attacks[64];
 
 void init_pawn_attacks() { // Initialise array
-    for (int square = 0; square < 64; square++) {
+    for (sq square = 0; square < 64; square++) {
         pawn_attacks[square][white] = generate_pawn_attacks(square, white);
         pawn_attacks[square][black] = generate_pawn_attacks(square, black);
     }
 }
 
 void init_knight_attacks() {
-    for (int square = 0; square < 64; square++) {
+    for (sq square = 0; square < 64; square++) {
         knight_attacks[square] = generate_knight_attacks(square);
     }
 }
 
 void init_king_attacks() {
-    for (int square = 0; square < 64; square++) {
+    for (sq square = 0; square < 64; square++) {
         king_attacks[square] = generate_king_attacks(square);
     }
 }
 
 void init_ray_attacks() {
-    for (int square = 0; square < 64; square++) {
+    for (sq square = 0; square < 64; square++) {
         U64 bishop_attack = generate_bishop_magic(square);
         U64 rook_attack = generate_rook_magic(square);
         bishop_boards[square] = bishop_attack;
@@ -604,14 +610,14 @@ void init_ray_attacks() {
 // Gamestate variables
 
 int castle;
-int ep_target;
+sq ep_target;
 int side;
 int draw_clock;
 int move_number;
 U64 bitboards[12]; // Piece bitboards
 U64 occupancies[3]; // White, Black, Both
 
-void add_occup(int square, int colour) {
+void add_occup(sq square, int colour) {
     set_bit(occupancies[both], square);
     if (!colour) set_bit(occupancies[white], square);
     else set_bit(occupancies[black], square);
@@ -619,7 +625,7 @@ void add_occup(int square, int colour) {
 
 void print_board() {
     printf("\n    a  b  c  d  e  f  g  h");
-    for (int square = 0; square < 64; square++) {
+    for (sq square = 0; square < 64; square++) {
         if (!(square % 8)) printf("\n %d ", 8 - (int)(square / 8));
         if (!get_bit(occupancies[both], square)) printf(" - ");
         else {
@@ -650,7 +656,7 @@ void init_fen(char fen[]) {
     memset(bitboards, 0ULL, 12);
     memset(occupancies, 0ULL, 3);
     int index = 0;
-    int square = 0;
+    sq square = 0;
     char c;
     while (1) {
         c = fen[index];
@@ -709,7 +715,7 @@ void init_fen(char fen[]) {
 
 // Piece moves/attacks calculatiosn
 
-static inline int is_attacked(int square, int attacking_side) {
+static inline int is_attacked(sq square, int attacking_side) {
     if ((pawn_attacks[square][attacking_side ? white : black] & bitboards[attacking_side ? bP : wP])) return 1;
     if ((knight_attacks[square] & bitboards[attacking_side ? bN : wN])) return 1;
     if ((king_attacks[square] & bitboards[attacking_side ? bK : wK])) return 1;
@@ -719,18 +725,26 @@ static inline int is_attacked(int square, int attacking_side) {
 }
 
 // Moves
-#define move unsigned long
-/*
-start square = 6 bits
-end square = 6 bits
-piece = 4 bits
-promotion = 4 bits
-capture flag = 1 bit
-castle flag = 1 bit
-double push flag = 1 bit
-en passant flag = 1 bit
-total = 24 bits = 3 bytes = 6 nibbles
-*/
+#define move __int32
+static inline move encode(start, end, piece, promotion, capture, castle, doublepush, ep) {
+    return start | end << 6 | piece << 12 | promotion << 16 | capture << 20 | castle << 21 | doublepush << 22 | ep << 23;
+}
+
+static inline sq start(move m) { return m & 0x3F; }
+
+static inline sq end(move m) { return (m >> 6) & 0x3F; }
+
+static inline int piece(move m) { return (m >> 12) & 0xF; }
+
+static inline int promotion(move m) { return (m >> 16) & 0xF; }
+
+static inline int is_capture(move m) { return (m >> 20) & 1; }
+
+static inline int is_castle(move m) { return (m >> 21) & 1; }
+
+static inline int is_doublepush(move m) { return (m >> 22) & 1; }
+
+static inline int is_ep(move m) { return (m >> 23) & 1; }
 
 static inline void generate_moves() {
 
@@ -740,5 +754,6 @@ int main() {
     init_attacks();
     init_fen(start_fen);
     print_board();
+    printf("%0x", encode(e2, e4, wP, 0, 0, 0, 1, 0));
     return 0;
 }
