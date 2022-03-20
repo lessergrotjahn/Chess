@@ -667,6 +667,7 @@ static inline U64 get_attacks(int square, int piece) {
         a = pawn_attacks[square][piece / 6];
         break;
     }
+    return a;
 }
 
 void add_occup(int square, int colour) {
@@ -868,7 +869,7 @@ static inline void generate_moves() {
                 while (a) {
                     U64 end_board = lsb(a);
                     end = count_bits(end_board - 1);
-                    if (end_board & occupancies[not_side(side)] || end == ep_target) {
+                    if (end_board & occupancies[not_side(side)]) {
                         if (pawn_board & rank7) { // Promotion
                             add_move(encode(start, end, wP, wQ, 1, 0, 0, 0));
                             add_move(encode(start, end, wP, wR, 1, 0, 0, 0));
@@ -878,6 +879,9 @@ static inline void generate_moves() {
                         else {
                             add_move(encode(start, end, wP, 0, 1, 0, 0, 0));
                         }
+                    }
+                    if (end == ep_target) {
+                        add_move(encode(start, end, wP, 0, 1, 0, 0, 1));
                     }
                     unset_bit(a, end);
                 }
@@ -906,7 +910,7 @@ static inline void generate_moves() {
                 while (a) {
                     U64 end_board = lsb(a);
                     end = count_bits(end_board - 1);
-                    if (end_board & occupancies[not_side(side)] || end == ep_target) {
+                    if (end_board & occupancies[not_side(side)]) {
                         if (pawn_board & rank2) { // Promotion
                             add_move(encode(start, end, bP, bQ, 1, 0, 0, 0));
                             add_move(encode(start, end, bP, bR, 1, 0, 0, 0));
@@ -916,6 +920,9 @@ static inline void generate_moves() {
                         else {
                             add_move(encode(start, end, bP, 0, 1, 0, 0, 0));
                         }
+                    }
+                    if (end == ep_target) {
+                        add_move(encode(start, end, bP, 0, 1, 0, 0, 1));
                     }
                     unset_bit(a, end);
                 }
@@ -1031,7 +1038,7 @@ move create_move(char str[]) {
         }
     }
     else if ('A' <= str[0] && str[0] <= 'Z') { // Piece moves
-        int piece = piece_from_char[str[0]];
+        int piece = piece_from_char[str[0]] + side * 6;
         int cap = 0;
         if (str[1] == 'x') cap = 1;
         if ((str[len - 1] == '+') || (str[len - 1] == '#')) len--;
@@ -1079,7 +1086,10 @@ move create_move(char str[]) {
         if (str[1] == 'x') cap = 1;
         if (str[len - 1] == '+' || str[len - 1] == "#") len--;
         int promo = 0;
-        if (str[len - 2] == '=') promo = piece_from_char[str[len-1]] + side * 6;
+        if (str[len - 2] == '=') {
+            promo = piece_from_char[str[len - 1]] + side * 6;
+            len -= 2;
+        }
         int end = 8 * (8 - (str[len - 1] - '0')) + str[len - 2] - 'a';
         if (!(0 <= end <= 63)) return invalid;
         if (cap) {
