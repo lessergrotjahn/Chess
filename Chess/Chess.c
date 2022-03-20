@@ -1001,8 +1001,12 @@ static inline int make_move(move m, int capture_flag) {
     if (!capture_flag) {
         reset_occup(m.start);
         reset_occup(m.end);
-        if (m.piece == wK) {} // castling stuff
-        if (m.piece == bK) {}
+        if (m.piece == wK) castle_rights &= (k | q); // castling stuff
+        if (m.piece == bK) castle_rights &= (K | Q);
+        if (m.start == h1 || m.end == h1) castle_rights &= (Q | k | q);
+        if (m.start == a1 || m.end == a1) castle_rights &= (K | k | q);
+        if (m.start == h8 || m.end == h8) castle_rights &= (K | Q | q);
+        if (m.start == a8 || m.end == a8) castle_rights &= (K | Q | k);
         if (m.enpassant) {
             if (side == white) reset_occup(m.end + 8);
             else reset_occup(m.end - 8);
@@ -1015,7 +1019,36 @@ static inline int make_move(move m, int capture_flag) {
             set_bit(bitboards[m.promotion], m.end);
         }
         add_occup(m.end, get_colour(m.piece));
-        
+        if (m.castle) {
+            if (m.end == g1) { // White kingside 
+                unset_bit(bitboards[wR], h1);
+                unset_bit(occupancies[both], h1);
+                unset_bit(occupancies[white], h1);
+                set_bit(bitboards[wR], f1);
+                add_occup(f1, white);
+            }
+            else if (m.end == c1) { // White queenside 
+                unset_bit(bitboards[wR], a1);
+                unset_bit(occupancies[both], a1);
+                unset_bit(occupancies[white], a1);
+                set_bit(bitboards[wR], d1);
+                add_occup(d1, white);
+            }
+            if (m.end == g8) { // Black kingside 
+                unset_bit(bitboards[bR], h8);
+                unset_bit(occupancies[both], h8);
+                unset_bit(occupancies[black], h8);
+                set_bit(bitboards[bR], f8);
+                add_occup(f8, black);
+            }
+            else if (m.end == c8) { // Black queenside
+                unset_bit(bitboards[bR], a8);
+                unset_bit(occupancies[both], a8);
+                unset_bit(occupancies[black], a8);
+                set_bit(bitboards[bR], d8);
+                add_occup(d8, black);
+            }
+        }
         side = not_side(side);
     }
     else {
