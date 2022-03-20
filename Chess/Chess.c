@@ -8,6 +8,7 @@
 #define set_bit(bitboard, square) ((bitboard) |= (1ULL << (square)))
 #define get_bit(bitboard, square) (((bitboard) >> (square)) & 1)
 #define toggle_bit(bitboard, square) ((bitboard) ^= (1ULL << (square)))
+#define unset_bit(bitboard, square) ((bitboard) &= ~(1ULL << (square)))
 
 //#define pop_bit(bitboard, square) (get_bit(bitboard, square) ? bitboard ^= (1ULL << square) : 0)
 
@@ -244,6 +245,8 @@ enum {
     white, black, both
 };
 
+#define not_side(side) (side ? white : black)
+
 enum { // Rook = 0, Bishop = 1
     rook, bishop
 };
@@ -295,7 +298,7 @@ U64 set_occupancy(int index, int relevant_bits, U64 attack_board) {
     U64 occupancy = 0ULL;
     for (int count = 0; count < relevant_bits; count++) {
         int square = lsb_index(attack_board);
-        toggle_bit(attack_board, square);
+        unset_bit(attack_board, square);
         if (index & (1 << count)) {
             set_bit(occupancy, square);
         }
@@ -627,8 +630,6 @@ void init_ray_attacks() {
 int castle_rights;
 int ep_target;
 int side;
-int draw_clock;
-int move_number;
 U64 bitboards[12]; // Piece bitboards
 U64 occupancies[3]; // White, Black, Both
 
@@ -676,13 +677,10 @@ void add_occup(int square, int colour) {
 
 void reset_occup(int square) {
     for (int i = 0; i < 3; i++) {
-        if (get_bit(occupancies[i], square)) toggle_bit(occupancies[i], square);
+        unset_bit(occupancies[i], square);
     }
     for (int piece = wK; piece < bP; piece++) {
-        if (get_bit(bitboards[piece], square)) {
-            toggle_bit(bitboards[piece], square);
-            break;
-        }
+        unset_bit(bitboards[piece], square);
     }
 }
 
@@ -793,6 +791,7 @@ struct packed_move {
     unsigned int castle : 1;
     unsigned int doublepush : 1;
     unsigned int enpassant : 1;
+    unsigned int index : 24;
 } pack;
 typedef struct packed_move move;
 
@@ -806,6 +805,7 @@ move encode(int start, int end, int piece, int promotion, int capture, int castl
     m.castle = castle;
     m.doublepush = doublepush;
     m.enpassant = enpassant;
+    m.index = start | end << 6 | piece << 12 | promotion << 16 | capture << 20 | castle << 21 | doublepush << 22 | enpassant << 23;
     return m;
 }
 
@@ -868,7 +868,7 @@ static inline void generate_moves() {
                 while (a) {
                     U64 end_board = lsb(a);
                     end = count_bits(end_board - 1);
-                    if (end_board & occupancies[~side] || end == ep_target) {
+                    if (end_board & occupancies[not_side(side)] || end == ep_target) {
                         if (pawn_board & rank7) { // Promotion
                             add_move(encode(start, end, wP, wQ, 1, 0, 0, 0));
                             add_move(encode(start, end, wP, wR, 1, 0, 0, 0));
@@ -879,16 +879,16 @@ static inline void generate_moves() {
                             add_move(encode(start, end, wP, 0, 1, 0, 0, 0));
                         }
                     }
-                    toggle_bit(a, end);
+                    unset_bit(a, end);
                 }
                 b ^= pawn_board;
             }
         }
-        if (piece == bP) { // Get pawn moves
+        else if (piece == bP) { // Get pawn moves
             while (b) { // Quiet pawn moves
                 U64 pawn_board = lsb(b);
                 U64 start = count_bits(pawn_board - 1);
-                if (nortOne(pawn_board) & ~occupancies[both]) {
+                if (soutOne(pawn_board) & ~occupancies[both]) {
                     if (pawn_board & rank2) { // Promotion
                         add_move(encode(start, start + 8, bP, bQ, 0, 0, 0, 0));
                         add_move(encode(start, start + 8, bP, bR, 0, 0, 0, 0));
@@ -897,7 +897,7 @@ static inline void generate_moves() {
                     }
                     else {
                         add_move(encode(start, start + 8, bP, 0, 0, 0, 0, 0));
-                        if (nortOne(nortOne(pawn_board)) & ~occupancies[both] & rank5) {
+                        if (soutOne(soutOne(pawn_board)) & ~occupancies[both] & rank5) {
                             add_move(encode(start, start + 16, bP, 0, 0, 0, 1, 0));
                         }
                     }
@@ -906,7 +906,7 @@ static inline void generate_moves() {
                 while (a) {
                     U64 end_board = lsb(a);
                     end = count_bits(end_board - 1);
-                    if (end_board & occupancies[~side] || end == ep_target) {
+                    if (end_board & occupancies[not_side(side)] || end == ep_target) {
                         if (pawn_board & rank2) { // Promotion
                             add_move(encode(start, end, bP, bQ, 1, 0, 0, 0));
                             add_move(encode(start, end, bP, bR, 1, 0, 0, 0));
@@ -917,7 +917,7 @@ static inline void generate_moves() {
                             add_move(encode(start, end, bP, 0, 1, 0, 0, 0));
                         }
                     }
-                    toggle_bit(a, end);
+                    unset_bit(a, end);
                 }
                 b ^= pawn_board;
             }
@@ -942,13 +942,13 @@ static inline void generate_moves() {
                     a = knight_attacks[start];
                     break;
                 }
-                a &= (~occupancies[side]); //Restrict friendly fire 
+                a &= ~(occupancies[side]); //Restrict friendly fire 
                 while (a) {
                     end = lsb_index(a);
                     add_move(encode(start, end, piece, 0, get_bit(occupancies[both], end), 0, 0, 0));
-                    toggle_bit(a, end);
+                    unset_bit(a, end);
                 }
-                toggle_bit(b, start);
+                unset_bit(b, start);
             }
         }
         if (piece == wK && !is_attacked(e1, black)) {
@@ -986,8 +986,6 @@ static inline void generate_moves() {
     }
 }
 
-
-
 enum {
     all_moves, capture_moves
 };
@@ -996,15 +994,22 @@ static inline int make_move(move m, int capture_flag) {
     if (!capture_flag) {
         reset_occup(m.start);
         reset_occup(m.end);
+        if (m.piece == wK) {} // castling stuff
+        if (m.piece == bK) {}
         if (m.enpassant) {
-            // remove the pesky pawn grr >:(
+            if (side == white) reset_occup(m.end + 8);
+            else reset_occup(m.end - 8);
         }
-        toggle_bit(bitboards[m.piece], m.start);
+        if (m.doublepush) ep_target = (m.end + m.start) / 2;
+        else ep_target = no_sq;
+        unset_bit(bitboards[m.piece], m.start);
         if (!m.promotion) set_bit(bitboards[m.piece], m.end);
         else {
             set_bit(bitboards[m.promotion], m.end);
         }
         add_occup(m.end, get_colour(m.piece));
+        
+        side = not_side(side);
     }
     else {
         if (m.capture) {
@@ -1025,11 +1030,11 @@ move create_move(char str[]) {
             return encode(side ? e8 : e1, side ? c8 : c1, 6 * side, 0, 0, 1, 0, 0);
         }
     }
-    if ('A' <= str[0] <= 'Z') { // Piece moves
+    else if ('A' <= str[0] && str[0] <= 'Z') { // Piece moves
         int piece = piece_from_char[str[0]];
         int cap = 0;
         if (str[1] == 'x') cap = 1;
-        if (str[len - 1] == '+' || str[len - 1] == "#") len--;
+        if ((str[len - 1] == '+') || (str[len - 1] == '#')) len--;
         int end = 8 * (8 - (str[len-1] - '0')) + str[len-2] - 'a';
         if (!(0 <= end <= 63)) return invalid;
         U64 b = get_attacks(end, piece) & bitboards[piece];
@@ -1038,7 +1043,7 @@ move create_move(char str[]) {
         U64 c = b;
         while (c) {
             piece_squares[i] = lsb_index(c);
-            toggle_bit(c, piece_squares[i]);
+            unset_bit(c, piece_squares[i]);
             i++;
         }
         if (!i) {
@@ -1061,7 +1066,7 @@ move create_move(char str[]) {
         int j = 0;
         while (b) {
             restricted_squares[j] = lsb_index(b);
-            toggle_bit(b, restricted_squares[j]);
+            unset_bit(b, restricted_squares[j]);
             j++;
         }
         if (j == 1) {
@@ -1070,15 +1075,62 @@ move create_move(char str[]) {
         else return invalid;
     }
     else { // Pawn 
-        printf("not gaming");
+        int cap = 0;
+        if (str[1] == 'x') cap = 1;
+        if (str[len - 1] == '+' || str[len - 1] == "#") len--;
+        int promo = 0;
+        if (str[len - 2] == '=') promo = piece_from_char[str[len-1]] + side * 6;
+        int end = 8 * (8 - (str[len - 1] - '0')) + str[len - 2] - 'a';
+        if (!(0 <= end <= 63)) return invalid;
+        if (cap) {
+            U64 b = pawn_attacks[end][not_side(side)];
+            char c1 = str[0];
+            b &= ((U64)0x0101010101010101 << (c1 - 'a'));
+            int start = lsb_index(b);
+            int ep = get_bit(occupancies[both], end) ? 0 : 1;
+            return encode(start, end, wP + side * 6, promo, 1, 0, 0, ep);
+        }
+        else {
+            U64 b = 0ULL;
+            set_bit(b, end);
+            if (!side) { // White quiet move
+                if (soutOne(b) & bitboards[wP]) return encode(end + 8, end, wP, promo, 0, 0, 0, 0);
+                else if (b & rank4) return encode(end + 16, end, wP, 0, 0, 0, 1, 0);
+            }
+            else { // Black quiet move
+                if (nortOne(b) & bitboards[bP]) return encode(end - 8, end, bP, promo, 0, 0, 0, 0);
+                else if (b & rank5) return encode(end - 16, end, bP, 0, 0, 0, 1, 0);
+            }
+        }
+    }
+}
+
+int string_loop() {
+    init_fen(start_fen);
+    while (1) {
+        print_board();
+        char move_str[7];
+        gets(move_str);
+        if (move_str[0] == 'q') return 0;
+        generate_moves();
+        move m = create_move(move_str);
+        if (!m.index) {
+            printf("Invalid move!\n");
+            continue;
+        }
+        print_move(m);
+        unsigned int index = m.index;
+        int is_legal = 0;
+        for (int i = 0; i < count; i++) {
+            if (move_list[i].index == index) { is_legal = 1; break; }
+        }
+        if (is_legal) make_move(m, all_moves);
+        else printf("Invalid move!\n");
     }
 }
 
 int main() {
     init_attacks();
-    init_fen(start_fen);
-    print_move(create_move("Kd1"));
-    make_move(create_move("Kd1"), all_moves);
-    print_board();
+    string_loop();
     return 0;
 }
