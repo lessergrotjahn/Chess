@@ -257,6 +257,84 @@ const U64 not_h = (U64)0x7F7F7F7F7F7F7F7F;
 const U64 not_ab = (U64)0xFCFCFCFCFCFCFCFC;
 const U64 not_gh = (U64)0x3F3F3F3F3F3F3F3F;
 
+// Square tables from CPW - All tables are for white but can be reversed easily
+
+int pawn_square_value[64] = {
+     0,  0,  0,  0,  0,  0,  0,  0,
+    50, 50, 50, 50, 50, 50, 50, 50,
+    10, 10, 20, 30, 30, 20, 10, 10,
+     5,  5, 10, 25, 25, 10,  5,  5,
+     0,  0,  0, 20, 20,  0,  0,  0,
+     5, -5,-10,  0,  0,-10, -5,  5,
+     5, 10, 10,-20,-20, 10, 10,  5,
+     0,  0,  0,  0,  0,  0,  0,  0
+};
+
+int knight_square_value[64] = { // Encourages knifht moves to centre of board
+    -50,-40,-30,-30,-30,-30,-40,-50,
+    -40,-20,  0,  0,  0,  0,-20,-40,
+    -30,  0, 10, 15, 15, 10,  0,-30,
+    -30,  5, 15, 20, 20, 15,  5,-30,
+    -30,  0, 15, 20, 20, 15,  0,-30,
+    -30,  5, 10, 15, 15, 10,  5,-30,
+    -40,-20,  0,  5,  5,  0,-20,-40,
+    -50,-40,-30,-30,-30,-30,-40,-50
+};
+
+int bishop_square_value[64] = {
+    -20,-10,-10,-10,-10,-10,-10,-20,
+    -10,  0,  0,  0,  0,  0,  0,-10,
+    -10,  0,  5, 10, 10,  5,  0,-10,
+    -10,  5,  5, 10, 10,  5,  5,-10,
+    -10,  0, 10, 10, 10, 10,  0,-10,
+    -10, 10, 10, 10, 10, 10, 10,-10,
+    -10,  5,  0,  0,  0,  0,  5,-10,
+    -20,-10,-10,-10,-10,-10,-10,-20
+};
+
+int rook_square_value[64] = {
+      0,  0,  0,  0,  0,  0,  0,  0,
+      5, 10, 10, 10, 10, 10, 10,  5,
+     -5,  0,  0,  0,  0,  0,  0, -5,
+     -5,  0,  0,  0,  0,  0,  0, -5,
+     -5,  0,  0,  0,  0,  0,  0, -5,
+     -5,  0,  0,  0,  0,  0,  0, -5,
+     -5,  0,  0,  0,  0,  0,  0, -5,
+      0,  0,  0,  5,  5,  0,  0,  0
+};
+
+int queen_square_value[64] = {
+    -20,-10,-10, -5, -5,-10,-10,-20,
+    -10,  0,  0,  0,  0,  0,  0,-10,
+    -10,  0,  5,  5,  5,  5,  0,-10,
+     -5,  0,  5,  5,  5,  5,  0, -5,
+      0,  0,  5,  5,  5,  5,  0, -5,
+    -10,  5,  5,  5,  5,  5,  0,-10,
+    -10,  0,  5,  0,  0,  0,  0,-10,
+    -20,-10,-10, -5, -5,-10,-10,-20
+};
+
+int king_square_early_value[64] = {
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -20,-30,-30,-40,-40,-30,-30,-20,
+    -10,-20,-20,-20,-20,-20,-20,-10,
+     20, 20,  0,  0,  0,  0, 20, 20,
+     20, 30, 10,  0,  0, 10, 30, 20
+};
+
+int king_square_late_value[64] = {
+    -50,-40,-30,-20,-20,-30,-40,-50,
+    -30,-20,-10,  0,  0,-10,-20,-30,
+    -30,-10, 20, 30, 30, 20,-10,-30,
+    -30,-10, 30, 40, 40, 30,-10,-30,
+    -30,-10, 30, 40, 40, 30,-10,-30,
+    -30,-10, 20, 30, 30, 20,-10,-30,
+    -30,-30,  0,  0,  0,  0,-30,-30,
+    -50,-30,-30,-30,-30,-30,-30,-50
+};
 
 // Count bits in a bitboard
 
@@ -707,13 +785,6 @@ void print_board() {
                                               (castle_rights & k) ? 'k' : '-', (castle_rights & q) ? 'q' : '-');
 }
 
-void init_attacks() {
-    init_king_attacks();
-    init_knight_attacks();
-    init_pawn_attacks();
-    init_ray_attacks();
-}
-
 void init_fen(char fen[]) {
     memset(bitboards, 0ULL, 96); // 8 bytes per board, 12 boards
     memset(occupancies, 0ULL, 24); // 3 boards
@@ -1148,6 +1219,59 @@ move create_move(char str[]) {
     }
 }
 
+// Evaluation
+
+int piece_material_value[12] = {
+    10000, 900, 500, 300, 300, 100, -10000, -900, -500, -300, -300, -100
+};
+
+int piece_square_value[64][14]; // 12 = wKLate 13 = bKLate
+
+void init_piece_square_values() {
+    for (int square = 0; square < 64; square++) {
+        for (int piece = wK; piece <= bP; piece++) {
+            int col = get_colour(piece);
+            switch (piece % 6) {
+            case 0:
+                piece_square_value[square][piece] = col ? -king_square_early_value[63 - square] : king_square_early_value[square];
+                break;
+            case 1:
+                piece_square_value[square][piece] = col ? -queen_square_value[63 - square] : queen_square_value[square];
+                break;
+            case 2:
+                piece_square_value[square][piece] = col ? -rook_square_value[63 - square] : rook_square_value[square];
+                break;
+            case 3:
+                piece_square_value[square][piece] = col ? -bishop_square_value[63 - square] : bishop_square_value[square];
+                break;
+            case 4:
+                piece_square_value[square][piece] = col ? -knight_square_value[63 - square] : knight_square_value[square];
+                break;
+            case 5:
+                piece_square_value[square][piece] = col ? -pawn_square_value[63 - square] : pawn_square_value[square];
+                break;
+            }
+        }
+        piece_square_value[square][12] = king_square_late_value[square];
+        piece_square_value[square][13] = -king_square_late_value[63 - square];
+    }
+}
+
+static inline int evaluate() {
+    int score = 0;
+    U64 b;
+    for (int piece = wK; piece <= bP; piece++) {
+        b = bitboards[piece];
+        while (b) {
+            int sq = lsb_index(b);
+            score += piece_material_value[piece];
+            score += piece_square_value[sq][piece];
+            unset_bit(b, sq);
+        }
+    }
+    return side ? -score : score; // Return positive for winning position, no matter the side
+}
+
 int string_loop() {
     init_fen(start_fen);
     while (1) {
@@ -1172,8 +1296,17 @@ int string_loop() {
     }
 }
 
+void init_all() {
+    init_king_attacks();
+    init_knight_attacks();
+    init_pawn_attacks();
+    init_ray_attacks();
+    init_piece_square_values();
+}
+
 int main() {
-    init_attacks();
-    string_loop();
+    init_all();
+    init_fen(start_fen);
+    printf("%d\n", evaluate());
     return 0;
 }
