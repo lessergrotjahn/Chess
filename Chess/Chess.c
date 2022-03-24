@@ -23,6 +23,7 @@
 #define castle_fen2 "8/8/8/8/3k4/8/rp6/R3K3 w Q - 0 1" // cant castle queenside due to pawn
 #define castle_fen3 "8/8/4k3/8/8/pr6/8/R3K2R w KQ - 0 1" // Can casle despite pawn attacking b1
 #define promo_fen "1k6/5P2/8/8/8/8/8/4K3 w - - 20 1"
+#define temp_fen "r1b1kb1r/1pp1pppp/p1nq1n2/8/8/2N2N2/PPPPBPPP/R1BQR1K1 w kq - 0 8"
 
 /*
 1. d4 Nc6 2. e4 e6 3. Nf3 Qf6 4. c4 Bb4+ 5. Nc3 Nge7 6. Be2 O-O 7. O-O Bxc3 8. bxc3 h6 9. Ba3 d6 10. e5 Qf4 11. g3 Qf5 12. Nh4 Qh7 13. exd6 cxd6 14. Bxd6 Bd7 15. Rb1
@@ -712,20 +713,22 @@ void init_ray_attacks() {
 int castle_rights;
 int ep_target;
 int side;
+int wKing;
+int bKing;
 U64 bitboards[12]; // Piece bitboards
 U64 occupancies[3]; // White, Black, Both
 
 #define save_state() \
 U64 c_bitboards[12], c_occupancies[3]; \
-int c_side, c_castle_rights, c_ep_target; \
+int c_side, c_castle_rights, c_ep_target, c_wKing, c_bKing; \
 memcpy(c_bitboards, bitboards, 96); \
 memcpy(c_occupancies, occupancies, 24); \
-c_side = side; c_castle_rights = castle_rights; c_ep_target = ep_target; \
+c_side = side; c_castle_rights = castle_rights; c_ep_target = ep_target; c_wKing = wKing; c_bKing = bKing; \
 
 #define load_state() \
 memcpy(bitboards, c_bitboards, 96); \
 memcpy(occupancies, c_occupancies, 24); \
-side = c_side; castle_rights = c_castle_rights; c_ep_target = ep_target; \
+side = c_side; castle_rights = c_castle_rights; c_ep_target = ep_target; wKing = c_wKing; bKing = c_bKing; \
 
 static inline U64 get_attacks(int square, int piece) {
     U64 a;
@@ -800,8 +803,11 @@ void init_fen(char fen[]) {
         index++;
         if (c == '/') continue;
         if (('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')) {
-            set_bit(bitboards[piece_from_char[c]], square);
-            add_occup(square, get_colour(piece_from_char[c]));
+            int piece = piece_from_char[c];
+            set_bit(bitboards[piece], square);
+            add_occup(square, get_colour(piece));
+            if (piece == wK) wKing = square;
+            if (piece == bK) bKing = square;
             square++;
         }
         else {
@@ -867,11 +873,10 @@ struct packed_move {
     unsigned int castle : 1;
     unsigned int doublepush : 1;
     unsigned int enpassant : 1;
-    unsigned int index : 24;
 } pack;
 typedef struct packed_move move;
 
-move encode(int start, int end, int piece, int promotion, int capture, int castle, int doublepush, int enpassant) {
+static inline move encode(int start, int end, int piece, int promotion, int capture, int castle, int doublepush, int enpassant) {
     move m;
     m.start = start;
     m.end = end;
@@ -881,12 +886,15 @@ move encode(int start, int end, int piece, int promotion, int capture, int castl
     m.castle = castle;
     m.doublepush = doublepush;
     m.enpassant = enpassant;
-    m.index = start | end << 6 | piece << 12 | promotion << 16 | capture << 20 | castle << 21 | doublepush << 22 | enpassant << 23;
     return m;
 }
 
+int get_index(move m) {
+    return m.start | m.end << 6 | m.piece << 12 | m.promotion << 16 | m.capture << 20 | m.castle << 21 | m.doublepush << 22 | m.enpassant << 23;
+}
+
 void print_move(move move) {
-    printf("\n%s %s -> %s  %s  Flags = %d%d%d%d", piece_strings[move.piece], coord[move.start], coord[move.end],
+    printf("%s %s -> %s  %s  Flags = %d%d%d%d", piece_strings[move.piece], coord[move.start], coord[move.end],
         move.promotion ? piece_strings[move.promotion] : "",
         move.capture, move.castle, move.doublepush, move.enpassant);
 }
@@ -1072,6 +1080,46 @@ static inline void generate_moves() {
     }
 }
 
+static inline void generate_captures() {
+    count = 0;
+    int start, end;
+    U64 b, a; // Bitboard, attacks
+    for (int piece = (side ? bK : wK); piece <= (side ? bP : wP); piece++) { // Iterate through all pieces of side to move
+        b = bitboards[piece];
+        if (!b) continue; // Continue if none of piece type exists
+        while (b) { // Get captures (excluding en passant and promotions)
+            start = lsb_index(b);
+            switch (piece % 6) {
+            case 0:
+                a = king_attacks[start];
+                break;
+            case 1:
+                a = generate_queen_attacks(start, occupancies[both]);
+                break;
+            case 2:
+                a = generate_rook_attacks(start, occupancies[both]);
+                break;
+            case 3:
+                a = generate_bishop_attacks(start, occupancies[both]);
+                break;
+            case 4:
+                a = knight_attacks[start];
+                break;
+            case 5:
+                if ((side && start & rank2) || (!side && start & rank7)) continue; //Don't find promotions
+                a = pawn_attacks[start][side];
+            }
+            a &= occupancies[not_side(side)]; // Restrict to captures
+            while (a) {
+                end = lsb_index(a);
+                add_move(encode(start, end, piece, 0, 1, 0, 0, 0));
+                unset_bit(a, end);
+            }
+            unset_bit(b, start);
+        }
+    }
+}
+
 enum {
     all_moves, capture_moves
 };
@@ -1081,8 +1129,14 @@ static inline void make_move(move m) {
     unset_bit(bitboards[m.piece], m.start);
     remove_occup(m.end);
     reset_bitboards(m.end);
-    if (m.piece == wK) castle_rights &= (k | q); // castling stuff
-    if (m.piece == bK) castle_rights &= (K | Q);
+    if (m.piece == wK) {
+        castle_rights &= (k | q); // castling stuff
+        wKing = m.end;
+    }
+    if (m.piece == bK) {
+        castle_rights &= (K | Q);
+        bKing = m.end;
+    }
     U64 squares = 0ULL;
     set_bit(squares, m.start);
     set_bit(squares, m.end);
@@ -1141,10 +1195,18 @@ static inline void make_move(move m) {
     side = not_side(side);
 }
 
+#define save_quiet_move(m) \
+int c_castle = castle_rights; \
+int c_ep = ep_target; \
+int c_wKing = wKing; \
+int c_bKing = bKing; \
+
 #define undo_quiet_move(m) \
 side = not_side(side); \
 castle_rights = c_castle; \
 ep_target = c_ep; \
+wKing = c_wKing; \
+bKing = c_bKing; \
 unset_bit(bitboards[m.piece], m.end); \
 remove_occup(m.end); \
 set_bit(bitboards[m.piece], m.start); \
@@ -1245,9 +1307,82 @@ move create_move(char str[]) {
 
 // Evaluation
 
-int piece_material_value[12] = {
+static int piece_material_value[12] = {
     10000, 900, 500, 300, 300, 100, -10000, -900, -500, -300, -300, -100
 };
+
+static int mvv_lva[12][12]; // 12 victims, 12 attackers
+
+void init_mvv_lva() {
+    int score;
+    for (int victim = wK; victim <= bP; victim++) {
+        for (int attacker = wK; attacker <= bP; attacker++) {
+            score = 100 + 100 * ((11 - victim) % 6);
+            score += attacker % 6;
+            mvv_lva[victim][attacker] = score;
+        }
+    }
+}
+
+static inline int score_move(move m) {
+    if (m.capture) {
+        int target_piece;
+        for (int target = side ? wK : bK; target <= side ? wP : bP; target++) {
+            if (get_bit(bitboards[target], m.end)) {
+                    target_piece = target;
+                    break;
+            }
+        }
+        return mvv_lva[target_piece][m.piece];
+    }
+    return 0;
+}
+
+#define swap(i, j) \
+int temp_score = move_scores[j]; \
+move_scores[j] = move_scores[i]; \
+move_scores[i] = temp_score; \
+move temp_move = move_list[j]; \
+move_list[j] = move_list[i]; \
+move_list[i] = temp_move; \
+
+static inline void sort_move_list(int capturesOnly) {
+    int c_count;
+    if (capturesOnly) c_count = count;
+    else c_count = sort_captures();
+    int move_scores[128];
+    for (int i = 0; i < c_count; i++) {
+        move_scores[i] = score_move(move_list[i]);
+    }
+    for (int i = 0; i < c_count - 1; i++) { // Bubble Sort
+        for (int j = i + 1; j < count; j++) {
+            if (move_scores[j] > move_scores[i]) {
+                swap(i, j);
+            }
+        }
+    }
+}
+
+static inline int sort_captures() {
+    int c_count = 0;
+    move captures[128], quiet[128];
+    for (int i = 0; i < count; i++) {
+        if (move_list[i].capture) {
+            captures[c_count] = move_list[i];
+            c_count++;
+        }
+        else {
+            quiet[i - c_count] = move_list[i];
+        }
+    }
+    for (int i = 0; i < c_count; i++) {
+        move_list[i] = captures[i];
+    }
+    for (int i = c_count; i < count; i++) {
+        move_list[i] = quiet[i - c_count];
+    }
+    return c_count;
+}
 
 int piece_square_value[64][14]; // 12 = wKLate 13 = bKLate
 
@@ -1298,30 +1433,67 @@ static inline int evaluate() {
 
 move best_move;
 int ply = 0;
+int nodes = 0;
+
+static inline int negamax_captures(int alpha, int beta) {
+    nodes++;
+    //printf("%d\n", ply);
+    int evaluation = evaluate();
+    if (evaluation >= beta) return beta;
+    if (evaluation > alpha) alpha = evaluation;
+    generate_captures();
+    sort_move_list(capture_moves);
+    if (!count && !is_attacked(side ? bKing : wKing, not_side(side))) return 0; // Stalemate
+    move curr_list[128];
+    memcpy(curr_list, move_list, 512);
+    int curr_count = count;
+    for (int i = 0; i < curr_count; i++) {
+        move current = curr_list[i];
+        if (!current.capture) continue;
+        int score;
+        save_state();
+        make_move(current);
+        ply++;
+        if ((!side && is_attacked(bKing, white)) || (side && is_attacked(wKing, black))) score = -50000 + ply;
+        else score = -negamax_captures(-beta, -alpha);
+        ply--;
+        load_state();
+        if (score >= beta) return beta; // high fail
+        if (score > alpha) alpha = score;
+    }
+    return alpha;
+}
 
 static inline int negamax(int alpha, int beta, int depth) {
-    if (!depth) return evaluate();
+    nodes++;
+    if (!depth) {
+        //return negamax_captures(alpha, beta);
+        return evaluate();
+    }
     generate_moves();
+    sort_move_list(all_moves);
+    if (!count && !is_attacked(side ? bKing : wKing, not_side(side))) return 0; // Stalemate
     move curr_list[128];
-    memcpy(curr_list, move_list, 1024);
+    memcpy(curr_list, move_list, 512);
     int curr_count = count;
     for (int i = 0; i < curr_count; i++) {
         move current = curr_list[i];
         int score;
-        if (current.capture | current.castle) {
+        if (current.capture || current.castle || current.promotion) {
             save_state();
             ply++;
             make_move(current);
-            score = -negamax(-beta, -alpha, depth - 1);
+            if ((!side && is_attacked(bKing, white)) || (side && is_attacked(wKing, black))) score = -50000 + ply;
+            else score = -negamax(-beta, -alpha, depth - 1);
             load_state();
             ply--;
         }
         else {
-            int c_castle = castle_rights;
-            int c_ep = ep_target;
+            save_quiet_move();
             ply++;
             make_move(current);
-            score = -negamax(-beta, -alpha, depth - 1);
+            if ((!side && is_attacked(bKing, white)) || (side && is_attacked(wKing, black))) score = -50000 + ply;
+            else score = -negamax(-beta, -alpha, depth - 1);
             ply--;
             undo_quiet_move(current);
         }
@@ -1331,7 +1503,7 @@ static inline int negamax(int alpha, int beta, int depth) {
             if (!ply) best_move = current;
         }
     }
-    return alpha; // low fail
+    return alpha;
 }
 
 move find_best_move(depth) {
@@ -1349,20 +1521,22 @@ int string_loop(int whitePlayer, int blackPlayer) {
             gets(move_str);
             if (move_str[0] == 'q') return 0;
             m = create_move(move_str);
-            if (!m.index) {
+            if (!get_index(m)) {
                 printf("Invalid move!\n");
                 continue;
             }
         }
         else {
-            m = find_best_move(5);
+            nodes = 0;
+            m = find_best_move(6);
+            printf("Nodes Searched: %d\n", nodes);
         }
         print_move(m);
-        unsigned int index = m.index;
+        unsigned int index = get_index(m);
         int is_legal = 0;
         generate_moves();
         for (int i = 0; i < count; i++) {
-            if (move_list[i].index == index) { is_legal = 1; break; }
+            if (get_index(move_list[i]) == index) { is_legal = 1; break; }
         }
         if (is_legal) make_move(m);
         else printf("Invalid move!\n");
@@ -1375,6 +1549,7 @@ void init_all() {
     init_pawn_attacks();
     init_ray_attacks();
     init_piece_square_values();
+    init_mvv_lva();
 }
 
 int main() {
