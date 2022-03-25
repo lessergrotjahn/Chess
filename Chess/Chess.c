@@ -23,7 +23,7 @@
 #define castle_fen2 "8/8/8/8/3k4/8/rp6/R3K3 w Q - 0 1" // cant castle queenside due to pawn
 #define castle_fen3 "8/8/4k3/8/8/pr6/8/R3K2R w KQ - 0 1" // Can casle despite pawn attacking b1
 #define promo_fen "1k6/5P2/8/8/8/8/8/4K3 w - - 20 1"
-#define temp_fen "r1b1kb1r/1pp1pppp/p1nq1n2/8/8/2N2N2/PPPPBPPP/R1BQR1K1 w kq - 0 8"
+#define temp_fen "r2qk3/1pp1np1r/p3p3/4b1Bp/3pP3/P2P1Q1P/P1P2PP1/R3K1R1 b Qq - 4 16"
 
 /*
 1. d4 Nc6 2. e4 e6 3. Nf3 Qf6 4. c4 Bb4+ 5. Nc3 Nge7 6. Be2 O-O 7. O-O Bxc3 8. bxc3 h6 9. Ba3 d6 10. e5 Qf4 11. g3 Qf5 12. Nh4 Qh7 13. exd6 cxd6 14. Bxd6 Bd7 15. Rb1
@@ -250,7 +250,7 @@ enum {
     white, black, both
 };
 
-#define not_side(side) (side ? white : black)
+#define not_side(side) side ^ 1
 
 enum { // Rook = 0, Bishop = 1
     rook, bishop
@@ -719,17 +719,42 @@ int ply = 0;
 U64 bitboards[12]; // Piece bitboards
 U64 occupancies[3]; // White, Black, Both
 
+#define switch_side() (side ^= 1)
+
 #define save_state() \
-U64 c_bitboards[12], c_occupancies[3]; \
-int c_side, c_castle_rights, c_ep_target, c_wKing, c_bKing; \
 memcpy(c_bitboards, bitboards, 96); \
 memcpy(c_occupancies, occupancies, 24); \
-c_side = side; c_castle_rights = castle_rights; c_ep_target = ep_target; c_wKing = wKing; c_bKing = bKing; \
+c_side = side; \
+c_castle = castle_rights; \
+c_ep = ep_target; \
+c_wKing = wKing; \
+c_bKing = bKing; \
 
 #define load_state() \
 memcpy(bitboards, c_bitboards, 96); \
 memcpy(occupancies, c_occupancies, 24); \
-side = c_side; castle_rights = c_castle_rights; c_ep_target = ep_target; wKing = c_wKing; bKing = c_bKing; \
+side = c_side; \
+castle_rights = c_castle; \
+ep_target = c_ep; \
+wKing = c_wKing; \
+bKing = c_bKing; \
+
+#define save_quiet_move(m) \
+c_castle = castle_rights; \
+c_ep = ep_target; \
+c_wKing = wKing; \
+c_bKing = bKing; \
+
+#define undo_quiet_move(m) \
+switch_side(); \
+castle_rights = c_castle; \
+ep_target = c_ep; \
+wKing = c_wKing; \
+bKing = c_bKing; \
+unset_bit(bitboards[m.piece], m.end); \
+remove_occup(m.end); \
+set_bit(bitboards[m.piece], m.start); \
+add_occup(m.start, side); \
 
 static inline U64 get_attacks(int square, int piece) {
     U64 a;
@@ -905,6 +930,7 @@ void print_move_list(move move_list[]) {
         move m = move_list[i];
         if (m.start == m.end) break;
         print_move(m);
+        printf("\n");
     }
 }
 
@@ -925,8 +951,8 @@ U64 bKingCastlePath = (U64)0x0000000000000060;
 U64 bQueenCastlePath = (U64)0x000000000000000E;
 U64 b_a1 = 1ULL << a1;
 U64 b_h1 = 1ULL << h1;
-U64 b_a8 = 1ULL << a8;
-U64 b_h8 = 1ULL;
+U64 b_a8 = 1ULL;
+U64 b_h8 = 1ULL << h8;
 
 static inline void generate_moves() {
     count = 0;
@@ -1193,25 +1219,8 @@ static inline void make_move(move m) {
             add_occup(d8, black);
         }
     }
-    side = not_side(side);
+    switch_side();
 }
-
-#define save_quiet_move(m) \
-int c_castle = castle_rights; \
-int c_ep = ep_target; \
-int c_wKing = wKing; \
-int c_bKing = bKing; \
-
-#define undo_quiet_move(m) \
-side = not_side(side); \
-castle_rights = c_castle; \
-ep_target = c_ep; \
-wKing = c_wKing; \
-bKing = c_bKing; \
-unset_bit(bitboards[m.piece], m.end); \
-remove_occup(m.end); \
-set_bit(bitboards[m.piece], m.start); \
-add_occup(m.start, side); \
 
 move create_move(char str[]) {
     move invalid = encode(0, 0, 0, 0, 0, 0, 0, 0);
@@ -1258,7 +1267,6 @@ move create_move(char str[]) {
         if ('1' <= c2 && c2 <= '8') {
             b &= ((U64)0xFF << ((8 - c2 - '0') * 8));
         }
-        print_bitboard(b);
         i = 0;
         while (b) {
             piece_squares[i] = lsb_index(b);
@@ -1357,14 +1365,11 @@ move_list[j] = move_list[i]; \
 move_list[i] = temp_move; \
 
 static inline void sort_move_list(int capturesOnly) {
-    int c_count;
-    if (capturesOnly) c_count = count;
-    else c_count = sort_captures();
     int move_scores[128];
-    for (int i = 0; i < c_count; i++) {
+    for (int i = 0; i < count; i++) {
         move_scores[i] = score_move(move_list[i]);
     }
-    for (int i = 0; i < c_count - 1; i++) { // Bubble Sort
+    for (int i = 0; i < count - 1; i++) { // Bubble Sort
         for (int j = i + 1; j < count; j++) {
             if (move_scores[j] > move_scores[i]) {
                 swap(i, j);
@@ -1443,42 +1448,36 @@ static inline int evaluate() {
 
 int nodes = 0;
 
-static inline int quiescence(int alpha, int beta) {
-    nodes++;
-    //printf("%d\n", ply);
-    int evaluation = evaluate();
-    if (evaluation >= beta) return beta;
-    if (evaluation > alpha) alpha = evaluation;
-    generate_captures();
-    sort_move_list(capture_moves);
-    if (!count && !is_attacked(side ? bKing : wKing, not_side(side))) return 0; // Stalemate
-    move curr_list[128];
-    memcpy(curr_list, move_list, 512);
-    int curr_count = count;
-    for (int i = 0; i < curr_count; i++) {
-        move current = curr_list[i];
-        if (!current.capture) continue;
-        int score;
-        save_state();
-        make_move(current);
-        ply++;
-        if ((!side && is_attacked(bKing, white)) || (side && is_attacked(wKing, black))) score = -50000 + ply;
-        else score = -quiescence(-beta, -alpha);
-        ply--;
-        load_state();
-        if (score >= beta) return beta; // high fail
-        if (score > alpha) alpha = score;
-    }
-    return alpha;
-}
+const int full_depth_moves = 4;
+const int reduction_limit = 3;
+
+#define side_in_check() (side && is_attacked(bKing, white)) || (!side && is_attacked(wKing, black))
+#define not_side_in_check() (!side && is_attacked(bKing, white)) || (side && is_attacked(wKing, black))
 
 static inline int negamax(int alpha, int beta, int depth) {
     nodes++;
     pv_length[ply] = ply;
-    if (!depth) {
-        //return quiescence(alpha, beta);
+    if (depth <= 0) {
         return evaluate();
     }
+
+    U64 c_bitboards[12], c_occupancies[3];
+    int c_side, c_castle, c_ep, c_wKing, c_bKing;
+    int score;
+
+    int in_check = side_in_check();
+    if (in_check) depth += 1;
+    
+    if (depth > 2 && !in_check && ply) {
+        c_ep = ep_target;
+        switch_side();
+        ep_target = no_sq;
+        score = -negamax(-beta, -beta + 1, depth - 3); // null move pruning
+        switch_side();
+        ep_target = c_ep;
+        if (score >= beta) return beta;
+    }
+
     generate_moves();
     sort_move_list(all_moves);
     if (!count && !is_attacked(side ? bKing : wKing, not_side(side))) return 0; // Stalemate
@@ -1486,39 +1485,68 @@ static inline int negamax(int alpha, int beta, int depth) {
     memcpy(curr_list, move_list, 512);
     int curr_count = count;
     int found_pv = 0;
+
     for (int i = 0; i < curr_count; i++) {
         move current = curr_list[i];
-        int score;
-        if (current.capture || current.castle || current.promotion) {
+        ply++;
+        if (current.capture || current.promotion || current.castle) {
             save_state();
-            ply++;
             make_move(current);
-            if ((!side && is_attacked(bKing, white)) || (side && is_attacked(wKing, black))) score = -50000 + ply;
+            if (not_side_in_check()) score = -50000 + ply;
             else {
-                if (found_pv) { // PVS searches all other moves to prove they are worse
+                if (found_pv) { // PVS narrow searches all other moves to prove they are worse
                     score = -negamax(-alpha - 1, -alpha, depth - 1);
                     if (score > alpha && score < beta) score = -negamax(-beta, -alpha, depth - 1);
                 }
-                else score = -negamax(-beta, -alpha, depth - 1);
+                else {
+                    if (!i) score = -negamax(-beta, -alpha, depth - 1);
+                    else { // Late move reduction
+                        if (i > full_depth_moves && depth < reduction_limit && !in_check && !side_in_check() && !current.capture && !current.promotion) {
+                            score = -negamax(-alpha - 1, -alpha, depth - 2);
+                        }
+                        else score = alpha + 1;
+                        if (score > alpha) { // No LMR or better move found in LMR
+                            score = -negamax(-alpha - 1, -alpha, depth - 1); // Narrow search
+                            if (score > alpha && score < beta) { // If LMR fails    
+                                score = -negamax(-beta, -alpha, depth - 1); // Full search
+                            }
+                        }
+                    }
+                }
             }
             load_state();
-            ply--;
         }
         else {
             save_quiet_move();
-            ply++;
             make_move(current);
-            if ((!side && is_attacked(bKing, white)) || (side && is_attacked(wKing, black))) score = -50000 + ply;
+            if (not_side_in_check()) score = -50000 + ply;
             else {
-                if (found_pv) { // PVS searches all other moves to prove they are worse
+                if (found_pv) { // PVS narrow searches all other moves to prove they are worse
                     score = -negamax(-alpha - 1, -alpha, depth - 1);
                     if (score > alpha && score < beta) score = -negamax(-beta, -alpha, depth - 1);
                 }
-                else score = -negamax(-beta, -alpha, depth - 1);
+                else {
+                    if (!i) score = -negamax(-beta, -alpha, depth - 1);
+                    else { // Late move reduction
+                        if (i > full_depth_moves && depth < reduction_limit && !in_check && !side_in_check() && !current.capture && !current.promotion) {
+                            score = -negamax(-alpha - 1, -alpha, depth - 2);
+                        }
+                        else score = alpha + 1;
+                        if (score > alpha) { // No LMR or better move found in LMR
+                            score = -negamax(-alpha - 1, -alpha, depth - 1); // Narrow search
+                            if (score > alpha && score < beta) { // If LMR fails    
+                                score = -negamax(-beta, -alpha, depth - 1); // Full search
+                            }
+                        }
+                        
+                    }
+                }
             }
-            ply--;
             undo_quiet_move(current);
         }
+        ply--;
+        
+        // Pruning
         if (score >= beta) {
             if (!current.capture) {
                 killer_moves_index[1][ply] = killer_moves_index[0][ply];
@@ -1562,7 +1590,7 @@ void print_best_line() {
     }
 }
 
-int string_loop(int whitePlayer, int blackPlayer) {
+int string_loop(int whitePlayer, int blackPlayer, int depth) {
     init_fen(fen1);
     while (1) {
         print_board();
@@ -1578,7 +1606,7 @@ int string_loop(int whitePlayer, int blackPlayer) {
             }
         }
         else {
-            m = find_best_move(6);
+            m = find_best_move(depth);
             printf("\nNodes Searched: %d\n", nodes);
         }
         print_move(m);
@@ -1604,6 +1632,6 @@ void init_all() {
 
 int main() {
     init_all();
-    string_loop(1, 0);
+    string_loop(0, 1, 7);
     return 0;
 }
