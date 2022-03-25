@@ -17,7 +17,7 @@
 
 #define start_fen "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 #define empty_fen "8/8/8/8/8/8/8/8 w KQkq - 0 1"
-#define fen1 "r2q1rk1/ppp2ppp/2n1bn2/2b1p3/3pP3/3P1NPP/PPP1NPB1/R1BQ1RK1 b - - 0 9 "
+#define fen1 "r2q1rk1/ppp2ppp/2n1bn2/2b1p3/3pP3/3P1NPP/PPP1NPB1/R1BQ1RK1 b - - 0 9"
 #define fen2 "rnbqkb1r/pp1p1pPp/8/2p1pP2/1P1P4/3P3P/P1P1P3/RNBQKBNR w KQkq e6 0 1"
 #define castle_fen1 "8/4k3/8/8/8/8/P6P/R3K2R w KQ - 0 1" // can castle both sides
 #define castle_fen2 "8/8/8/8/3k4/8/rp6/R3K3 w Q - 0 1" // cant castle queenside due to pawn
@@ -715,6 +715,7 @@ int ep_target;
 int side;
 int wKing;
 int bKing;
+int ply = 0;
 U64 bitboards[12]; // Piece bitboards
 U64 occupancies[3]; // White, Black, Both
 
@@ -1313,11 +1314,16 @@ static int piece_material_value[12] = {
 
 static int mvv_lva[12][12]; // 12 victims, 12 attackers
 
+int killer_moves_index[2][64];
+int history_moves[12][64];
+move pv_table[64][64]; // [ply][ply]
+int pv_length[64];
+
 void init_mvv_lva() {
     int score;
     for (int victim = wK; victim <= bP; victim++) {
         for (int attacker = wK; attacker <= bP; attacker++) {
-            score = 100 + 100 * ((11 - victim) % 6);
+            score = 100 + 10 * ((11 - victim) % 6);
             score += attacker % 6;
             mvv_lva[victim][attacker] = score;
         }
@@ -1325,6 +1331,7 @@ void init_mvv_lva() {
 }
 
 static inline int score_move(move m) {
+    if (get_index(m) == get_index(pv_table[0][ply])) return 200;
     if (m.capture) {
         int target_piece;
         for (int target = side ? wK : bK; target <= side ? wP : bP; target++) {
@@ -1335,7 +1342,10 @@ static inline int score_move(move m) {
         }
         return mvv_lva[target_piece][m.piece];
     }
-    return 0;
+    int index = get_index(m);
+    if (killer_moves_index[0][ply] == index) return 99;
+    if (killer_moves_index[1][ply] == index) return 98;
+    else return history_moves[m.piece][m.end];
 }
 
 #define swap(i, j) \
@@ -1431,11 +1441,9 @@ static inline int evaluate() {
     return side ? -score : score; // Return positive for winning position, no matter the side
 }
 
-move best_move;
-int ply = 0;
 int nodes = 0;
 
-static inline int negamax_captures(int alpha, int beta) {
+static inline int quiescence(int alpha, int beta) {
     nodes++;
     //printf("%d\n", ply);
     int evaluation = evaluate();
@@ -1455,7 +1463,7 @@ static inline int negamax_captures(int alpha, int beta) {
         make_move(current);
         ply++;
         if ((!side && is_attacked(bKing, white)) || (side && is_attacked(wKing, black))) score = -50000 + ply;
-        else score = -negamax_captures(-beta, -alpha);
+        else score = -quiescence(-beta, -alpha);
         ply--;
         load_state();
         if (score >= beta) return beta; // high fail
@@ -1466,8 +1474,9 @@ static inline int negamax_captures(int alpha, int beta) {
 
 static inline int negamax(int alpha, int beta, int depth) {
     nodes++;
+    pv_length[ply] = ply;
     if (!depth) {
-        //return negamax_captures(alpha, beta);
+        //return quiescence(alpha, beta);
         return evaluate();
     }
     generate_moves();
@@ -1476,6 +1485,7 @@ static inline int negamax(int alpha, int beta, int depth) {
     move curr_list[128];
     memcpy(curr_list, move_list, 512);
     int curr_count = count;
+    int found_pv = 0;
     for (int i = 0; i < curr_count; i++) {
         move current = curr_list[i];
         int score;
@@ -1484,7 +1494,13 @@ static inline int negamax(int alpha, int beta, int depth) {
             ply++;
             make_move(current);
             if ((!side && is_attacked(bKing, white)) || (side && is_attacked(wKing, black))) score = -50000 + ply;
-            else score = -negamax(-beta, -alpha, depth - 1);
+            else {
+                if (found_pv) { // PVS searches all other moves to prove they are worse
+                    score = -negamax(-alpha - 1, -alpha, depth - 1);
+                    if (score > alpha && score < beta) score = -negamax(-beta, -alpha, depth - 1);
+                }
+                else score = -negamax(-beta, -alpha, depth - 1);
+            }
             load_state();
             ply--;
         }
@@ -1493,26 +1509,61 @@ static inline int negamax(int alpha, int beta, int depth) {
             ply++;
             make_move(current);
             if ((!side && is_attacked(bKing, white)) || (side && is_attacked(wKing, black))) score = -50000 + ply;
-            else score = -negamax(-beta, -alpha, depth - 1);
+            else {
+                if (found_pv) { // PVS searches all other moves to prove they are worse
+                    score = -negamax(-alpha - 1, -alpha, depth - 1);
+                    if (score > alpha && score < beta) score = -negamax(-beta, -alpha, depth - 1);
+                }
+                else score = -negamax(-beta, -alpha, depth - 1);
+            }
             ply--;
             undo_quiet_move(current);
         }
-        if (score >= beta) return beta; // high fail
+        if (score >= beta) {
+            if (!current.capture) {
+                killer_moves_index[1][ply] = killer_moves_index[0][ply];
+                killer_moves_index[0][ply] = get_index(current);
+            }
+            return beta;
+        }
         if (score > alpha) { // new best move
+            found_pv = 1;
+
+            history_moves[current.piece][current.end] += depth;
             alpha = score;
-            if (!ply) best_move = current;
+            pv_table[ply][ply] = current;
+            for (int i = ply + 1; i < pv_length[ply + 1]; i++) {
+                pv_table[ply][i] = pv_table[ply + 1][i]; // Makes PV table triangular
+            }
+            pv_length[ply] = pv_length[ply + 1];
         }
     }
     return alpha;
 }
 
 move find_best_move(depth) {
-    negamax(-50000, 50000, depth);
-    return best_move;
+    memset(killer_moves_index, 0, sizeof(killer_moves_index));
+    memset(history_moves, 0, sizeof(history_moves));
+    memset(pv_table, 0, sizeof(pv_table));
+    memset(pv_length, 0, sizeof(pv_length));
+    nodes = 0;
+
+    // Iterative Deepening
+    for (int current_depth = 1; current_depth <= depth; current_depth++) {
+        negamax(-50000, 50000, current_depth);
+    }
+    return pv_table[0][0];
+}
+
+void print_best_line() {
+    for (int i = 0; i < pv_length[0]; i++) {
+        print_move(pv_table[0][i]);
+        printf("\n");
+    }
 }
 
 int string_loop(int whitePlayer, int blackPlayer) {
-    init_fen(start_fen);
+    init_fen(fen1);
     while (1) {
         print_board();
         move m;
@@ -1527,9 +1578,8 @@ int string_loop(int whitePlayer, int blackPlayer) {
             }
         }
         else {
-            nodes = 0;
             m = find_best_move(6);
-            printf("Nodes Searched: %d\n", nodes);
+            printf("\nNodes Searched: %d\n", nodes);
         }
         print_move(m);
         unsigned int index = get_index(m);
