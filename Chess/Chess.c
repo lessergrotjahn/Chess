@@ -2,34 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define U64 unsigned long long
+// TABLES
 
-// Operations on U64 bitboard by square
-#define set_bit(bitboard, square) ((bitboard) |= (1ULL << (square)))
-#define get_bit(bitboard, square) (((bitboard) >> (square)) & 1)
-#define toggle_bit(bitboard, square) ((bitboard) ^= (1ULL << (square)))
-#define unset_bit(bitboard, square) ((bitboard) &= ~(1ULL << (square)))
+// Magic Numbers
 
-//#define pop_bit(bitboard, square) (get_bit(bitboard, square) ? bitboard ^= (1ULL << square) : 0)
-
-
-// Constants:
-
-#define start_fen "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-#define empty_fen "8/8/8/8/8/8/8/8 w KQkq - 0 1"
-#define fen1 "r2q1rk1/ppp2ppp/2n1bn2/2b1p3/3pP3/3P1NPP/PPP1NPB1/R1BQ1RK1 b - - 0 9"
-#define fen2 "rnbqkb1r/pp1p1pPp/8/2p1pP2/1P1P4/3P3P/P1P1P3/RNBQKBNR w KQkq e6 0 1"
-#define castle_fen1 "8/4k3/8/8/8/8/P6P/R3K2R w KQ - 0 1" // can castle both sides
-#define castle_fen2 "8/8/8/8/3k4/8/rp6/R3K3 w Q - 0 1" // cant castle queenside due to pawn
-#define castle_fen3 "8/8/4k3/8/8/pr6/8/R3K2R w KQ - 0 1" // Can casle despite pawn attacking b1
-#define promo_fen "1k6/5P2/8/8/8/8/8/4K3 w - - 20 1"
-#define temp_fen "r2qk3/1pp1np1r/p3p3/4b1Bp/3pP3/P2P1Q1P/P1P2PP1/R3K1R1 b Qq - 4 16"
-
-/*
-1. d4 Nc6 2. e4 e6 3. Nf3 Qf6 4. c4 Bb4+ 5. Nc3 Nge7 6. Be2 O-O 7. O-O Bxc3 8. bxc3 h6 9. Ba3 d6 10. e5 Qf4 11. g3 Qf5 12. Nh4 Qh7 13. exd6 cxd6 14. Bxd6 Bd7 15. Rb1
-*/
-
-U64 bishop_magic_numbers[64] = {
+const unsigned long long bishop_magic_numbers[64] = {
     0x40040822862081ULL,
     0x14310404009000ULL,
     0x1004015401000208ULL,
@@ -96,7 +73,7 @@ U64 bishop_magic_numbers[64] = {
     0x20248400440020ULL
 };
 
-U64 rook_magic_numbers[64] = {
+const unsigned long long rook_magic_numbers[64] = {
     0x8a80104000800020ULL,
     0x140002000100040ULL,
     0x2801880a0017001ULL,
@@ -163,234 +140,6 @@ U64 rook_magic_numbers[64] = {
     0x80000910c4008026ULL
 };
 
-
-// Relevant piece occupancy bits
-const int bishop_bits[64] = {
-    6, 5, 5, 5, 5, 5, 5, 6,
-    5, 5, 5, 5, 5, 5, 5, 5,
-    5, 5, 7, 7, 7, 7, 5, 5,
-    5, 5, 7, 9, 9, 7, 5, 5,
-    5, 5, 7, 9, 9, 7, 5, 5,
-    5, 5, 7, 7, 7, 7, 5, 5,
-    5, 5, 5, 5, 5, 5, 5, 5,
-    6, 5, 5, 5, 5, 5, 5, 6
-};
-
-const int rook_bits[64] = {
-    12, 11, 11, 11, 11, 11, 11, 12,
-    11, 10, 10, 10, 10, 10, 10, 11,
-    11, 10, 10, 10, 10, 10, 10, 11,
-    11, 10, 10, 10, 10, 10, 10, 11,
-    11, 10, 10, 10, 10, 10, 10, 11,
-    11, 10, 10, 10, 10, 10, 10, 11,
-    11, 10, 10, 10, 10, 10, 10, 11,
-    12, 11, 11, 11, 11, 11, 11, 12
-};
-
-enum {
-    wK, wQ, wR, wB, wN, wP,
-    bK, bQ, bR, bB, bN, bP
-};
-
-char piece_chars[12] = "KQRBNPkqrbnp";
-
-
-const char* piece_strings[] = {
-    "White King", "White Queen", "White Rook", "White Bishop", "White Knight", "White Pawn",
-    "Black King", "Black Queen", "Black Rook", "Black Bishop", "Black Knight", "Black Pawn"
-};
-
-
-int piece_from_char[] = {
-    ['K'] = wK,
-    ['Q'] = wQ,
-    ['R'] = wR,
-    ['B'] = wB,
-    ['N'] = wN,
-    ['P'] = wP,
-    ['k'] = bK,
-    ['q'] = bQ,
-    ['r'] = bR,
-    ['b'] = bB,
-    ['n'] = bN,
-    ['p'] = bP,
-};
-
-
-
-enum { // Castling rights
-    K = 1, Q = 2, k = 4, q = 8
-};
-
-// Enumerate bits from square names -- a8: 0, b8: 1, a7: 8, ...
-enum {
-    a8, b8, c8, d8, e8, f8, g8, h8,
-    a7, b7, c7, d7, e7, f7, g7, h7,
-    a6, b6, c6, d6, e6, f6, g6, h6,
-    a5, b5, c5, d5, e5, f5, g5, h5,
-    a4, b4, c4, d4, e4, f4, g4, h4,
-    a3, b3, c3, d3, e3, f3, g3, h3,
-    a2, b2, c2, d2, e2, f2, g2, h2,
-    a1, b1, c1, d1, e1, f1, g1, h1, no_sq
-};
-
-const char* coord[] = { // Array of coords
-    "a8", "b8", "c8", "d8", "e8", "f8", "g8", "h8",
-    "a7", "b7", "c7", "d7", "e7", "f7", "g7", "h7",
-    "a6", "b6", "c6", "d6", "e6", "f6", "g6", "h6",
-    "a5", "b5", "c5", "d5", "e5", "f5", "g5", "h5",
-    "a4", "b4", "c4", "d4", "e4", "f4", "g4", "h4",
-    "a3", "b3", "c3", "d3", "e3", "f3", "g3", "h3",
-    "a2", "b2", "c2", "d2", "e2", "f2", "g2", "h2",
-    "a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1"
-};
-
-// Enumarate colour index from name -- white: 0, black: 1, both: 2
-enum {
-    white, black, both
-};
-
-#define not_side(side) side ^ 1
-
-enum { // Rook = 0, Bishop = 1
-    rook, bishop
-};
-
-// U64 with all bits apart from a and h file on
-const U64 not_a = (U64)0xFEFEFEFEFEFEFEFE;
-const U64 not_h = (U64)0x7F7F7F7F7F7F7F7F;
-const U64 not_ab = (U64)0xFCFCFCFCFCFCFCFC;
-const U64 not_gh = (U64)0x3F3F3F3F3F3F3F3F;
-
-// Square tables from CPW - All tables are for white but can be reversed easily
-
-int pawn_square_value[64] = {
-     0,  0,  0,  0,  0,  0,  0,  0,
-    50, 50, 50, 50, 50, 50, 50, 50,
-    10, 10, 20, 30, 30, 20, 10, 10,
-     5,  5, 10, 25, 25, 10,  5,  5,
-     0,  0,  0, 20, 20,  0,  0,  0,
-     5, -5,-10,  0,  0,-10, -5,  5,
-     5, 10, 10,-20,-20, 10, 10,  5,
-     0,  0,  0,  0,  0,  0,  0,  0
-};
-
-int knight_square_value[64] = { // Encourages knifht moves to centre of board
-    -50,-40,-30,-30,-30,-30,-40,-50,
-    -40,-20,  0,  0,  0,  0,-20,-40,
-    -30,  0, 10, 15, 15, 10,  0,-30,
-    -30,  5, 15, 20, 20, 15,  5,-30,
-    -30,  0, 15, 20, 20, 15,  0,-30,
-    -30,  5, 10, 15, 15, 10,  5,-30,
-    -40,-20,  0,  5,  5,  0,-20,-40,
-    -50,-40,-30,-30,-30,-30,-40,-50
-};
-
-int bishop_square_value[64] = {
-    -20,-10,-10,-10,-10,-10,-10,-20,
-    -10,  0,  0,  0,  0,  0,  0,-10,
-    -10,  0,  5, 10, 10,  5,  0,-10,
-    -10,  5,  5, 10, 10,  5,  5,-10,
-    -10,  0, 10, 10, 10, 10,  0,-10,
-    -10, 10, 10, 10, 10, 10, 10,-10,
-    -10,  5,  0,  0,  0,  0,  5,-10,
-    -20,-10,-10,-10,-10,-10,-10,-20
-};
-
-int rook_square_value[64] = {
-      0,  0,  0,  0,  0,  0,  0,  0,
-      5, 10, 10, 10, 10, 10, 10,  5,
-     -5,  0,  0,  0,  0,  0,  0, -5,
-     -5,  0,  0,  0,  0,  0,  0, -5,
-     -5,  0,  0,  0,  0,  0,  0, -5,
-     -5,  0,  0,  0,  0,  0,  0, -5,
-     -5,  0,  0,  0,  0,  0,  0, -5,
-      0,  0,  0,  5,  5,  0,  0,  0
-};
-
-int queen_square_value[64] = {
-    -20,-10,-10, -5, -5,-10,-10,-20,
-    -10,  0,  0,  0,  0,  0,  0,-10,
-    -10,  0,  5,  5,  5,  5,  0,-10,
-     -5,  0,  5,  5,  5,  5,  0, -5,
-      0,  0,  5,  5,  5,  5,  0, -5,
-    -10,  5,  5,  5,  5,  5,  0,-10,
-    -10,  0,  5,  0,  0,  0,  0,-10,
-    -20,-10,-10, -5, -5,-10,-10,-20
-};
-
-int king_square_early_value[64] = {
-    -30,-40,-40,-50,-50,-40,-40,-30,
-    -30,-40,-40,-50,-50,-40,-40,-30,
-    -30,-40,-40,-50,-50,-40,-40,-30,
-    -30,-40,-40,-50,-50,-40,-40,-30,
-    -20,-30,-30,-40,-40,-30,-30,-20,
-    -10,-20,-20,-20,-20,-20,-20,-10,
-     20, 20,  0,  0,  0,  0, 20, 20,
-     20, 30, 10,  0,  0, 10, 30, 20
-};
-
-int king_square_late_value[64] = {
-    -50,-40,-30,-20,-20,-30,-40,-50,
-    -30,-20,-10,  0,  0,-10,-20,-30,
-    -30,-10, 20, 30, 30, 20,-10,-30,
-    -30,-10, 30, 40, 40, 30,-10,-30,
-    -30,-10, 30, 40, 40, 30,-10,-30,
-    -30,-10, 20, 30, 30, 20,-10,-30,
-    -30,-30,  0,  0,  0,  0,-30,-30,
-    -50,-30,-30,-30,-30,-30,-30,-50
-};
-
-// Count bits in a bitboard
-
-static inline int count_bits(U64 bitboard) {
-    int count;
-    for (count = 0; bitboard; count++) {
-        bitboard &= (bitboard - 1);
-    }
-    return count;
-}
-
-static inline U64 lsb(U64 b) {
-    return (b & (~b + 1));
-}
-
-// Get the index of the least significant first bit
-
-static inline int lsb_index(U64 bitboard) {
-    if (!bitboard) {
-        return -1;
-    }
-    return (count_bits((bitboard & (~bitboard + 1)) - 1));
-}
-
-void print_bitboard(U64 bitboard) {
-    printf("\n    a  b  c  d  e  f  g  h\n"); // Print files
-    for (int row = 0; row < 8; row++) {
-        printf(" %d ", 8 - row); // Print rank
-        for (int col = 0; col < 8; col++) {
-            int square = row * 8 + col; // Get integer value of square
-            printf(" %d ", (int)get_bit(bitboard, square));
-        }
-        printf("\n");
-    }
-    printf("Long Long Unsigned Decimal: %llud\n\n", bitboard);
-}
-
-U64 set_occupancy(int index, int relevant_bits, U64 attack_board) {
-    U64 occupancy = 0ULL;
-    for (int count = 0; count < relevant_bits; count++) {
-        int square = lsb_index(attack_board);
-        unset_bit(attack_board, square);
-        if (index & (1 << count)) {
-            set_bit(occupancy, square);
-        }
-    }
-    return occupancy;
-}
-
-#define get_colour(piece) ((int)(piece/6))
-
 // Magic Number Generator
 /*
 unsigned int state = 1804289383;
@@ -455,8 +204,264 @@ void init_magic() {
         rook_magic_numbers[square] = find_magic(square, rook);
     }
 }
-
 */
+
+// Relevant Occupancy Bits
+
+const int bishop_bits[64] = {
+    6, 5, 5, 5, 5, 5, 5, 6,
+    5, 5, 5, 5, 5, 5, 5, 5,
+    5, 5, 7, 7, 7, 7, 5, 5,
+    5, 5, 7, 9, 9, 7, 5, 5,
+    5, 5, 7, 9, 9, 7, 5, 5,
+    5, 5, 7, 7, 7, 7, 5, 5,
+    5, 5, 5, 5, 5, 5, 5, 5,
+    6, 5, 5, 5, 5, 5, 5, 6
+};
+
+const int rook_bits[64] = {
+    12, 11, 11, 11, 11, 11, 11, 12,
+    11, 10, 10, 10, 10, 10, 10, 11,
+    11, 10, 10, 10, 10, 10, 10, 11,
+    11, 10, 10, 10, 10, 10, 10, 11,
+    11, 10, 10, 10, 10, 10, 10, 11,
+    11, 10, 10, 10, 10, 10, 10, 11,
+    11, 10, 10, 10, 10, 10, 10, 11,
+    12, 11, 11, 11, 11, 11, 11, 12
+};
+
+// Piece Square Bonus Tables
+
+const int pawn_square_value[64] = {
+     0,  0,  0,  0,  0,  0,  0,  0,
+    50, 50, 50, 50, 50, 50, 50, 50,
+    10, 10, 20, 30, 30, 20, 10, 10,
+     5,  5, 10, 25, 25, 10,  5,  5,
+     0,  0,  0, 20, 20,  0,  0,  0,
+     5, -5,-10,  0,  0,-10, -5,  5,
+     5, 10, 10,-20,-20, 10, 10,  5,
+     0,  0,  0,  0,  0,  0,  0,  0
+};
+
+const int knight_square_value[64] = { // Encourages knifht moves to centre of board
+    -50,-40,-30,-30,-30,-30,-40,-50,
+    -40,-20,  0,  0,  0,  0,-20,-40,
+    -30,  0, 10, 15, 15, 10,  0,-30,
+    -30,  5, 15, 20, 20, 15,  5,-30,
+    -30,  0, 15, 20, 20, 15,  0,-30,
+    -30,  5, 10, 15, 15, 10,  5,-30,
+    -40,-20,  0,  5,  5,  0,-20,-40,
+    -50,-40,-30,-30,-30,-30,-40,-50
+};
+
+const int bishop_square_value[64] = {
+    -20,-10,-10,-10,-10,-10,-10,-20,
+    -10,  0,  0,  0,  0,  0,  0,-10,
+    -10,  0,  5, 10, 10,  5,  0,-10,
+    -10,  5,  5, 10, 10,  5,  5,-10,
+    -10,  0, 10, 10, 10, 10,  0,-10,
+    -10, 10, 10, 10, 10, 10, 10,-10,
+    -10,  5,  0,  0,  0,  0,  5,-10,
+    -20,-10,-10,-10,-10,-10,-10,-20
+};
+
+const int rook_square_value[64] = {
+      0,  0,  0,  0,  0,  0,  0,  0,
+      5, 10, 10, 10, 10, 10, 10,  5,
+     -5,  0,  0,  0,  0,  0,  0, -5,
+     -5,  0,  0,  0,  0,  0,  0, -5,
+     -5,  0,  0,  0,  0,  0,  0, -5,
+     -5,  0,  0,  0,  0,  0,  0, -5,
+     -5,  0,  0,  0,  0,  0,  0, -5,
+      0,  0,  0,  5,  5,  0,  0,  0
+};
+
+const int queen_square_value[64] = {
+    -20,-10,-10, -5, -5,-10,-10,-20,
+    -10,  0,  0,  0,  0,  0,  0,-10,
+    -10,  0,  5,  5,  5,  5,  0,-10,
+     -5,  0,  5,  5,  5,  5,  0, -5,
+      0,  0,  5,  5,  5,  5,  0, -5,
+    -10,  5,  5,  5,  5,  5,  0,-10,
+    -10,  0,  5,  0,  0,  0,  0,-10,
+    -20,-10,-10, -5, -5,-10,-10,-20
+};
+
+const int king_square_early_value[64] = {
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -20,-30,-30,-40,-40,-30,-30,-20,
+    -10,-20,-20,-20,-20,-20,-20,-10,
+     20, 20,  0,  0,  0,  0, 20, 20,
+     20, 30, 10,  0,  0, 10, 30, 20
+};
+
+const int king_square_late_value[64] = {
+    -50,-40,-30,-20,-20,-30,-40,-50,
+    -30,-20,-10,  0,  0,-10,-20,-30,
+    -30,-10, 20, 30, 30, 20,-10,-30,
+    -30,-10, 30, 40, 40, 30,-10,-30,
+    -30,-10, 30, 40, 40, 30,-10,-30,
+    -30,-10, 20, 30, 30, 20,-10,-30,
+    -30,-30,  0,  0,  0,  0,-30,-30,
+    -50,-30,-30,-30,-30,-30,-30,-50
+};
+
+const int king_square_value[64][2] = {
+    king_square_early_value, king_square_late_value
+};
+
+#define U64 unsigned long long
+#define not_side(side) side ^ 1
+#define switch_side() side ^= 1
+
+// Operations on U64 bitboard by square
+#define set_bit(bitboard, square) ((bitboard) |= (1ULL << (square)))
+#define get_bit(bitboard, square) (((bitboard) >> (square)) & 1)
+#define toggle_bit(bitboard, square) ((bitboard) ^= (1ULL << (square)))
+#define unset_bit(bitboard, square) ((bitboard) &= ~(1ULL << (square)))
+#define lsb(bitboard) ((bitboard) & (~(bitboard) + 1)) // Least significant bit
+
+//#define pop_bit(bitboard, square) (get_bit(bitboard, square) ? bitboard ^= (1ULL << square) : 0)
+
+
+// Constants:
+#define start_fen "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+#define empty_fen "8/8/8/8/8/8/8/8 w KQkq - 0 1"
+#define fen1 "r2q1rk1/ppp2ppp/2n1bn2/2b1p3/3pP3/3P1NPP/PPP1NPB1/R1BQ1RK1 b - - 0 9"
+#define fen2 "rnbqkb1r/pp1p1pPp/8/2p1pP2/1P1P4/3P3P/P1P1P3/RNBQKBNR w KQkq e6 0 1"
+#define temp_fen "r2qk3/1pp1np1r/p3p3/4b1Bp/3pP3/P2P1Q1P/P1P2PP1/R3K1R1 b Qq - 4 16"
+
+enum {
+    wK, wQ, wR, wB, wN, wP,
+    bK, bQ, bR, bB, bN, bP
+};
+
+char piece_chars[12] = "KQRBNPkqrbnp";
+
+
+const char* piece_strings[] = {
+    "White King", "White Queen", "White Rook", "White Bishop", "White Knight", "White Pawn",
+    "Black King", "Black Queen", "Black Rook", "Black Bishop", "Black Knight", "Black Pawn"
+};
+
+
+int piece_from_char[] = {
+    ['K'] = wK,
+    ['Q'] = wQ,
+    ['R'] = wR,
+    ['B'] = wB,
+    ['N'] = wN,
+    ['P'] = wP,
+    ['k'] = bK,
+    ['q'] = bQ,
+    ['r'] = bR,
+    ['b'] = bB,
+    ['n'] = bN,
+    ['p'] = bP,
+};
+
+enum { // Castling rights
+    K = 1, Q = 2, k = 4, q = 8
+};
+
+// Enumerate bits from square names -- a8: 0, b8: 1, a7: 8, ...
+enum {
+    a8, b8, c8, d8, e8, f8, g8, h8,
+    a7, b7, c7, d7, e7, f7, g7, h7,
+    a6, b6, c6, d6, e6, f6, g6, h6,
+    a5, b5, c5, d5, e5, f5, g5, h5,
+    a4, b4, c4, d4, e4, f4, g4, h4,
+    a3, b3, c3, d3, e3, f3, g3, h3,
+    a2, b2, c2, d2, e2, f2, g2, h2,
+    a1, b1, c1, d1, e1, f1, g1, h1, 
+    no_sq
+};
+
+const char* coord[] = { // Array of coords
+    "a8", "b8", "c8", "d8", "e8", "f8", "g8", "h8",
+    "a7", "b7", "c7", "d7", "e7", "f7", "g7", "h7",
+    "a6", "b6", "c6", "d6", "e6", "f6", "g6", "h6",
+    "a5", "b5", "c5", "d5", "e5", "f5", "g5", "h5",
+    "a4", "b4", "c4", "d4", "e4", "f4", "g4", "h4",
+    "a3", "b3", "c3", "d3", "e3", "f3", "g3", "h3",
+    "a2", "b2", "c2", "d2", "e2", "f2", "g2", "h2",
+    "a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1"
+};
+
+// Enumarate colour index from name -- white: 0, black: 1, both: 2
+enum {
+    white, black, both
+};
+
+enum { // Rook = 0, Bishop = 1
+    rook, bishop
+};
+
+const U64 not_a = (U64)0xFEFEFEFEFEFEFEFE;
+const U64 not_h = (U64)0x7F7F7F7F7F7F7F7F;
+const U64 not_ab = (U64)0xFCFCFCFCFCFCFCFC;
+const U64 not_gh = (U64)0x3F3F3F3F3F3F3F3F;
+const U64 rank2 = (U64)0x00FF000000000000;
+const U64 rank4 = (U64)0x000000FF00000000;
+const U64 rank5 = (U64)0x00000000FF000000;
+const U64 rank7 = (U64)0x000000000000FF00;
+const U64 wKingCastlePath = (U64)0x6000000000000000;
+const U64 wQueenCastlePath = (U64)0x0E00000000000000;
+const U64 bKingCastlePath = (U64)0x0000000000000060;
+const U64 bQueenCastlePath = (U64)0x000000000000000E;
+const U64 b_a1 = 1ULL << a1;
+const U64 b_h1 = 1ULL << h1;
+const U64 b_a8 = 1ULL;
+const U64 b_h8 = 1ULL << h8;
+
+// Count bits in a bitboard
+
+static inline int count_bits(U64 bitboard) {
+    int count;
+    for (count = 0; bitboard; count++) {
+        bitboard &= (bitboard - 1);
+    }
+    return count;
+}
+
+// Get the index of the least significant first bit
+
+static inline int lsb_index(U64 bitboard) {
+    if (!bitboard) {
+        return -1;
+    }
+    return (count_bits(lsb(bitboard) - 1));
+}
+
+void print_bitboard(U64 bitboard) {
+    printf("\n    a  b  c  d  e  f  g  h\n"); // Print files
+    for (int row = 0; row < 8; row++) {
+        printf(" %d ", 8 - row); // Print rank
+        for (int col = 0; col < 8; col++) {
+            int square = row * 8 + col; // Get integer value of square
+            printf(" %d ", (int)get_bit(bitboard, square));
+        }
+        printf("\n");
+    }
+    printf("Long Long Unsigned Decimal: %llud\n\n", bitboard);
+}
+
+U64 set_occupancy(int index, int relevant_bits, U64 attack_board) {
+    U64 occupancy = 0ULL;
+    for (int count = 0; count < relevant_bits; count++) {
+        int square = lsb_index(attack_board);
+        unset_bit(attack_board, square);
+        if (index & (1 << count)) {
+            set_bit(occupancy, square);
+        }
+    }
+    return occupancy;
+}
+
+#define get_colour(piece) (int)(piece/6)
 
 U64 get_bishop_attacks(int square, U64 blockers) {
     U64 attacks = 0ULL;
@@ -660,9 +665,7 @@ static inline U64 soutOne(U64 b) {
     return b << 8;
 }
 
-// Pawn attacks: pawn_attaks[square][side] 2-dimensional 64x2 array of attack bitboards
 U64 pawn_attacks[64][2];
-// Other attacks are same for white and black, only 1D array
 U64 knight_attacks[64];
 U64 king_attacks[64];
 
@@ -708,6 +711,46 @@ void init_ray_attacks() {
     }
 }
 
+U64 bitboards[12]; // Piece bitboards
+U64 occupancies[3]; // White, Black, Both
+
+static inline U64 get_attacks(int square, int piece) {
+    U64 a;
+    switch (piece % 6) {
+    case 0:
+        a = king_attacks[square];
+        break;
+    case 1:
+        a = generate_queen_attacks(square, occupancies[both]);
+        break;
+    case 2:
+        a = generate_rook_attacks(square, occupancies[both]);
+        break;
+    case 3:
+        a = generate_bishop_attacks(square, occupancies[both]);
+        break;
+    case 4:
+        a = knight_attacks[square];
+        break;
+    case 5:
+        a = pawn_attacks[square][piece / 6];
+        break;
+    }
+    return a;
+}
+
+static inline int is_attacked(int square, int attacking_side) {
+    if ((pawn_attacks[square][attacking_side ? white : black] & bitboards[attacking_side ? bP : wP])) return 1;
+    if ((knight_attacks[square] & bitboards[attacking_side ? bN : wN])) return 1;
+    if ((king_attacks[square] & bitboards[attacking_side ? bK : wK])) return 1;
+    if ((generate_bishop_attacks(square, occupancies[both]) & (bitboards[attacking_side ? bB : wB] | bitboards[attacking_side ? bQ : wQ]))) return 1;
+    if ((generate_rook_attacks(square, occupancies[both]) & (bitboards[attacking_side ? bR : wR] | bitboards[attacking_side ? bQ : wQ]))) return 1;
+    return 0;
+}
+
+#define side_in_check() (side && is_attacked(bKing, white)) || (!side && is_attacked(wKing, black))
+#define not_side_in_check() (!side && is_attacked(bKing, white)) || (side && is_attacked(wKing, black))
+
 // Gamestate variables
 
 int castle_rights;
@@ -716,10 +759,6 @@ int side;
 int wKing;
 int bKing;
 int ply = 0;
-U64 bitboards[12]; // Piece bitboards
-U64 occupancies[3]; // White, Black, Both
-
-#define switch_side() (side ^= 1)
 
 #define save_state() \
 memcpy(c_bitboards, bitboards, 96); \
@@ -755,31 +794,6 @@ unset_bit(bitboards[m.piece], m.end); \
 remove_occup(m.end); \
 set_bit(bitboards[m.piece], m.start); \
 add_occup(m.start, side); \
-
-static inline U64 get_attacks(int square, int piece) {
-    U64 a;
-    switch (piece % 6) {
-    case 0:
-        a = king_attacks[square];
-        break;
-    case 1:
-        a = generate_queen_attacks(square, occupancies[both]);
-        break;
-    case 2:
-        a = generate_rook_attacks(square, occupancies[both]);
-        break;
-    case 3:
-        a = generate_bishop_attacks(square, occupancies[both]);
-        break;
-    case 4:
-        a = knight_attacks[square];
-        break;
-    case 5:
-        a = pawn_attacks[square][piece / 6];
-        break;
-    }
-    return a;
-}
 
 #define add_occup(square, colour) \
 set_bit(occupancies[both], square); \
@@ -819,8 +833,8 @@ void print_board() {
 }
 
 void init_fen(char fen[]) {
-    memset(bitboards, 0ULL, 96); // 8 bytes per board, 12 boards
-    memset(occupancies, 0ULL, 24); // 3 boards
+    memset(bitboards, 0, 96); // 8 bytes per board, 12 boards
+    memset(occupancies, 0, 24); // 3 boards
     int index = 0;
     int square = 0;
     char c;
@@ -878,17 +892,6 @@ void init_fen(char fen[]) {
     }
 }
 
-// Piece moves/attacks calculatiosn
-
-static inline int is_attacked(int square, int attacking_side) {
-    if ((pawn_attacks[square][attacking_side ? white : black] & bitboards[attacking_side ? bP : wP])) return 1;
-    if ((knight_attacks[square] & bitboards[attacking_side ? bN : wN])) return 1;
-    if ((king_attacks[square] & bitboards[attacking_side ? bK : wK])) return 1;
-    if ((generate_bishop_attacks(square, occupancies[both]) & (bitboards[attacking_side ? bB : wB] | bitboards[attacking_side ? bQ : wQ]))) return 1;
-    if ((generate_rook_attacks(square, occupancies[both]) & (bitboards[attacking_side ? bR : wR] | bitboards[attacking_side ? bQ : wQ]))) return 1;
-    return 0;
-}
-
 // Moves
 struct packed_move {
     unsigned int start : 6;
@@ -940,19 +943,6 @@ static inline void add_move(move move) {
     move_list[count] = move;
     count++;
 }
-
-U64 rank2 = (U64)0x00FF000000000000;
-U64 rank4 = (U64)0x000000FF00000000;
-U64 rank5 = (U64)0x00000000FF000000;
-U64 rank7 = (U64)0x000000000000FF00;
-U64 wKingCastlePath = (U64)0x6000000000000000;
-U64 wQueenCastlePath = (U64)0x0E00000000000000;
-U64 bKingCastlePath = (U64)0x0000000000000060;
-U64 bQueenCastlePath = (U64)0x000000000000000E;
-U64 b_a1 = 1ULL << a1;
-U64 b_h1 = 1ULL << h1;
-U64 b_a8 = 1ULL;
-U64 b_h8 = 1ULL << h8;
 
 static inline void generate_moves() {
     count = 0;
@@ -1407,7 +1397,7 @@ void init_piece_square_values() {
             int col = get_colour(piece);
             switch (piece % 6) {
             case 0:
-                piece_square_value[square][piece] = col ? -king_square_early_value[63 - square] : king_square_early_value[square];
+                piece_square_value[square][piece] = col ? -king_square_value[63 - square][0] : king_square_value[square][0];
                 break;
             case 1:
                 piece_square_value[square][piece] = col ? -queen_square_value[63 - square] : queen_square_value[square];
@@ -1426,23 +1416,38 @@ void init_piece_square_values() {
                 break;
             }
         }
-        piece_square_value[square][12] = king_square_late_value[square];
-        piece_square_value[square][13] = -king_square_late_value[63 - square];
+        piece_square_value[square][12] = king_square_value[square][1];
+        piece_square_value[square][13] = -king_square_value[63 - square][1];
     }
 }
 
 static inline int evaluate() {
     int score = 0;
     U64 b;
-    for (int piece = wK; piece <= bP; piece++) {
+    int tot_mat = 0;
+    for (int piece = wQ; piece <= wP; piece++) {
         b = bitboards[piece];
         while (b) {
             int sq = lsb_index(b);
             score += piece_material_value[piece];
             score += piece_square_value[sq][piece];
+            tot_mat += piece_material_value[piece];
             unset_bit(b, sq);
         }
     }
+    for (int piece = bQ; piece <= bP; piece++) {
+        b = bitboards[piece];
+        while (b) {
+            int sq = lsb_index(b);
+            score += piece_material_value[piece];
+            score += piece_square_value[sq][piece];
+            tot_mat -= piece_material_value[piece];
+            unset_bit(b, sq);
+        }
+    }
+    int is_endgame = (tot_mat < 4001);
+    score += piece_square_value[wKing][is_endgame ? 12 : wK];
+    score += piece_square_value[bKing][is_endgame ? 13 : bK];
     return side ? -score : score; // Return positive for winning position, no matter the side
 }
 
@@ -1450,9 +1455,6 @@ int nodes = 0;
 
 const int full_depth_moves = 4;
 const int reduction_limit = 3;
-
-#define side_in_check() (side && is_attacked(bKing, white)) || (!side && is_attacked(wKing, black))
-#define not_side_in_check() (!side && is_attacked(bKing, white)) || (side && is_attacked(wKing, black))
 
 static inline int negamax(int alpha, int beta, int depth) {
     nodes++;
@@ -1591,7 +1593,7 @@ void print_best_line() {
 }
 
 int string_loop(int whitePlayer, int blackPlayer, int depth) {
-    init_fen(fen1);
+    init_fen(start_fen);
     while (1) {
         print_board();
         move m;
@@ -1632,6 +1634,6 @@ void init_all() {
 
 int main() {
     init_all();
-    string_loop(0, 1, 7);
+    string_loop(1, 0, 7);
     return 0;
 }
