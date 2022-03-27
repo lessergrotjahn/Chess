@@ -1314,8 +1314,8 @@ static int mvv_lva[12][12]; // 12 victims, 12 attackers
 
 int killer_moves_index[2][64];
 int history_moves[12][64];
-move pv_table[64][64]; // [ply][ply]
-int pv_length[64];
+move pv[64]; // [ply]]
+int pv_length;
 
 void init_mvv_lva() {
     int score;
@@ -1329,7 +1329,7 @@ void init_mvv_lva() {
 }
 
 static inline int score_move(move m) {
-    if (get_index(m) == get_index(pv_table[0][ply])) return 200;
+    if (get_index(m) == get_index(pv[ply])) return 200;
     if (m.capture) {
         int target_piece;
         for (int target = side ? wK : bK; target <= side ? wP : bP; target++) {
@@ -1458,8 +1458,9 @@ const int reduction_limit = 3;
 
 static inline int negamax(int alpha, int beta, int depth) {
     nodes++;
-    pv_length[ply] = ply;
+
     if (depth <= 0) {
+        pv_length = ply;
         return evaluate();
     }
 
@@ -1486,7 +1487,6 @@ static inline int negamax(int alpha, int beta, int depth) {
     move curr_list[128];
     memcpy(curr_list, move_list, 512);
     int curr_count = count;
-    int found_pv = 0;
 
     for (int i = 0; i < curr_count; i++) {
         move current = curr_list[i];
@@ -1496,22 +1496,16 @@ static inline int negamax(int alpha, int beta, int depth) {
             make_move(current);
             if (not_side_in_check()) score = -50000 + ply;
             else {
-                if (found_pv) { // PVS narrow searches all other moves to prove they are worse
-                    score = -negamax(-alpha - 1, -alpha, depth - 1);
-                    if (score > alpha && score < beta) score = -negamax(-beta, -alpha, depth - 1);
-                }
-                else {
-                    if (!i) score = -negamax(-beta, -alpha, depth - 1);
-                    else { // Late move reduction
-                        if (i > full_depth_moves && depth < reduction_limit && !in_check && !side_in_check() && !current.capture && !current.promotion) {
-                            score = -negamax(-alpha - 1, -alpha, depth - 2);
-                        }
-                        else score = alpha + 1;
-                        if (score > alpha) { // No LMR or better move found in LMR
-                            score = -negamax(-alpha - 1, -alpha, depth - 1); // Narrow search
-                            if (score > alpha && score < beta) { // If LMR fails    
-                                score = -negamax(-beta, -alpha, depth - 1); // Full search
-                            }
+                if (!i) score = -negamax(-beta, -alpha, depth - 1);
+                else { // Late move reduction
+                    if (i > full_depth_moves && depth < reduction_limit && !in_check && !side_in_check() && !current.capture && !current.promotion) {
+                        score = -negamax(-alpha - 1, -alpha, depth - 2);
+                    }
+                    else score = alpha + 1;
+                    if (score > alpha) { // No LMR or better move found in LMR
+                        score = -negamax(-alpha - 1, -alpha, depth - 1); // Narrow search
+                        if (score > alpha && score < beta) { // If LMR fails    
+                            score = -negamax(-beta, -alpha, depth - 1); // Full search
                         }
                     }
                 }
@@ -1523,24 +1517,17 @@ static inline int negamax(int alpha, int beta, int depth) {
             make_move(current);
             if (not_side_in_check()) score = -50000 + ply;
             else {
-                if (found_pv) { // PVS narrow searches all other moves to prove they are worse
-                    score = -negamax(-alpha - 1, -alpha, depth - 1);
-                    if (score > alpha && score < beta) score = -negamax(-beta, -alpha, depth - 1);
-                }
-                else {
-                    if (!i) score = -negamax(-beta, -alpha, depth - 1);
-                    else { // Late move reduction
-                        if (i > full_depth_moves && depth < reduction_limit && !in_check && !side_in_check() && !current.capture && !current.promotion) {
-                            score = -negamax(-alpha - 1, -alpha, depth - 2);
+                if (!i) score = -negamax(-beta, -alpha, depth - 1);
+                else { // Late move reduction
+                    if (i > full_depth_moves && depth < reduction_limit && !in_check && !side_in_check() && !current.capture && !current.promotion) {
+                        score = -negamax(-alpha - 1, -alpha, depth - 2);
+                    }
+                    else score = alpha + 1;
+                    if (score > alpha) { // No LMR or better move found in LMR
+                        score = -negamax(-alpha - 1, -alpha, depth - 1); // Narrow search
+                        if (score > alpha && score < beta) { // If LMR fails    
+                            score = -negamax(-beta, -alpha, depth - 1); // Full search
                         }
-                        else score = alpha + 1;
-                        if (score > alpha) { // No LMR or better move found in LMR
-                            score = -negamax(-alpha - 1, -alpha, depth - 1); // Narrow search
-                            if (score > alpha && score < beta) { // If LMR fails    
-                                score = -negamax(-beta, -alpha, depth - 1); // Full search
-                            }
-                        }
-                        
                     }
                 }
             }
@@ -1557,37 +1544,44 @@ static inline int negamax(int alpha, int beta, int depth) {
             return beta;
         }
         if (score > alpha) { // new best move
-            found_pv = 1;
-
             history_moves[current.piece][current.end] += depth;
             alpha = score;
-            pv_table[ply][ply] = current;
-            for (int i = ply + 1; i < pv_length[ply + 1]; i++) {
-                pv_table[ply][i] = pv_table[ply + 1][i]; // Makes PV table triangular
-            }
-            pv_length[ply] = pv_length[ply + 1];
+            pv[ply] = current;
         }
     }
     return alpha;
 }
 
+#define window_adjust 50
+
 move find_best_move(depth) {
     memset(killer_moves_index, 0, sizeof(killer_moves_index));
     memset(history_moves, 0, sizeof(history_moves));
-    memset(pv_table, 0, sizeof(pv_table));
-    memset(pv_length, 0, sizeof(pv_length));
+    memset(pv, 0, sizeof(pv));
+    pv_length = 0;
     nodes = 0;
 
     // Iterative Deepening
-    for (int current_depth = 1; current_depth <= depth; current_depth++) {
-        negamax(-50000, 50000, current_depth);
+    int alpha = -50000;
+    int beta = 50000;
+    int score;
+    for (int current_depth = 1; current_depth <= depth;) {
+        score = negamax(alpha, beta, current_depth);
+        if (score <= alpha || score >= beta) { // If narrow window fails, reset to wider window and re-search
+            alpha = -50000;
+            beta = 50000;
+            continue;
+        }
+        alpha = score - window_adjust; // Narrow window for more pruning
+        beta = score + window_adjust;
+        current_depth++;
     }
-    return pv_table[0][0];
+    return pv[0];
 }
 
 void print_best_line() {
-    for (int i = 0; i < pv_length[0]; i++) {
-        print_move(pv_table[0][i]);
+    for (int i = 0; i < pv_length; i++) {
+        print_move(pv[i]);
         printf("\n");
     }
 }
