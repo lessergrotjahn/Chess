@@ -1617,6 +1617,97 @@ int string_loop(int whitePlayer, int blackPlayer, int depth) {
     }
 }
 
+char an[7]; // algebraic move notation
+int an_length;
+
+void get_an(move m) {
+    int len = 0;
+    int is_pawn = 0;
+    if (m.piece % 6 == 5) is_pawn = 1;
+    if (!is_pawn) {
+        an[0] = piece_chars[m.piece % 6]; // Always uppercase
+        len++;
+        if (m.capture) {
+            an[1] = 'x';
+            len++;
+        }
+        U64 b = get_attacks(m.end, m.piece);
+        b &= bitboards[m.piece];
+        if (count_bits(b) > 1) { // Disambiguation needed
+            an[len] = 'a' + (m.start % 8);
+            an[len + 1] = '1' + (8 - m.start / 8);
+            len += 2;
+        }
+    }
+    else {
+        if (m.capture) {
+            an[0] = 'a' + (m.start % 8);
+            an[1] = 'x';
+            len += 2;
+        }
+    }
+    an[len] = 'a' + (m.end % 8);
+    an[len + 1] = '0' + (8 - m.end / 8);
+    len += 2;
+    if (m.promotion) {
+        an[len] = '=';
+        an[len + 1] = piece_chars[m.promotion % 6];
+        len += 2;
+    }
+    if (side_in_check()) {
+        generate_moves();
+        int exists_legal = 0;
+        U64 c_bitboards[12], c_occupancies[3];
+        int c_ep, c_castle, c_wKing, c_bKing, c_side;
+        for (int i = 0; i < count; i++) {
+            save_state();
+            make_move(move_list[i]);
+            if (!not_side_in_check()) {
+                exists_legal = 1;
+                break;
+            }
+            load_state();
+        }
+        if (exists_legal) an[len] = '+';
+        else an[len] = '#';
+        len++;
+    }
+    an_length = len;
+}
+
+int python_communicator(int depth) {
+    char fen[128];
+    gets(fen);
+    init_fen(fen);
+    
+    int computer_side;
+    char side_str[6];
+    gets(side_str);
+    if (side_str[0] == 'w') computer_side = white;
+    else if (side_str[0] == 'b') computer_side = black;
+    else return -1;
+
+    move m;
+    while (1) {
+        if (side ^ computer_side) {
+            char move_str[7];
+            gets(move_str);
+            if (move_str[0] == 'q') return 0;
+            m = create_move(move_str);
+            make_move(m);
+        }
+        else {
+            m = find_best_move(depth);
+            make_move(m);
+            get_an(m);
+            for (int i = 0; i < an_length; i++) {
+                printf("%c", an[i]);
+            }
+            printf("\n");
+        }
+    }
+}
+
 void init_all() {
     init_king_attacks();
     init_knight_attacks();
@@ -1628,6 +1719,6 @@ void init_all() {
 
 int main() {
     init_all();
-    string_loop(1, 0, 7);
+    python_communicator(7);
     return 0;
 }
